@@ -1,0 +1,25 @@
+# Videos and Transcoding Artifacts
+videos/
+input/
+output/
+
+# Java / Maven
+target/
+*.class
+.mvn/
+mvnw
+mvnw.cmd
+
+# Angular / Node
+node_modules/
+dist/
+.angular/
+
+# IDEs
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# Logs
+*.log

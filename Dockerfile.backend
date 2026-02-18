@@ -1,0 +1,24 @@
+# Stage 1: Build with Maven
+FROM maven:3.9-eclipse-temurin-17 AS builder
+WORKDIR /build
+COPY backend/pom.xml .
+RUN mvn dependency:go-offline -B
+COPY backend/src ./src
+RUN mvn clean package -DskipTests -B
+
+# Stage 2: Runtime (Alpine-based — ARM64 support + reliable mirrors)
+FROM amazoncorretto:17-alpine
+WORKDIR /app
+
+# Install FFmpeg from Alpine repos (much more reliable than Ubuntu ARM64 mirrors)
+RUN apk add --no-cache ffmpeg
+
+# Copy the built JAR
+COPY --from=builder /build/target/*.jar app.jar
+
+# Create video directories
+RUN mkdir -p /app/videos/input /app/videos/output
+
+EXPOSE 8080
+
+ENTRYPOINT ["java", "-jar", "app.jar"]
