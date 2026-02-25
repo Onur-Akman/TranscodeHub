@@ -18,7 +18,9 @@
     "@angular/platform-browser": "^18.2.0",
     "@angular/platform-browser-dynamic": "^18.2.0",
     "@angular/router": "^18.2.0",
+    "hls.js": "^1.6.15",
     "rxjs": "~7.8.0",
+    "shaka-player": "^5.0.2",
     "tslib": "^2.3.0",
     "zone.js": "~0.14.10"
   },

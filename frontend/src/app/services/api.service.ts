@@ -13,16 +13,16 @@ export interface EncodingPreset {
     bufSize: string;
     audioBitrate: string;
     preset: string;
-    format: string;
 }
 
 export interface TranscodeJob {
     id: number;
     inputFileName: string;
     outputFileName: string;
-    presetId: number;
-    presetName: string;
-    status: 'QUEUED' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED';
+    presetIds: number[];
+    presetNames: string;
+    outputFormat: string;
+    status: 'QUEUED' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
     progress: number;
     createdAt: string;
     completedAt: string | null;
@@ -30,8 +30,27 @@ export interface TranscodeJob {
 }
 
 export interface TranscodeRequest {
-    inputFileName: string;
-    presetId: number;
+    inputFileName?: string;
+    inputUrl?: string;
+    presetIds: number[];
+    outputFormat: string;
+}
+
+export interface LiveStreamSettings {
+    id?: number;
+    jobId: number;
+    chunkDurationMinutes: number;
+    retentionPeriodHours: number;
+}
+
+export interface LiveStreamSegment {
+    id: number;
+    jobId: number;
+    fileName: string;
+    startTime: string;
+    endTime: string;
+    durationSeconds: number;
+    createdAt: string;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -83,5 +102,22 @@ export class ApiService {
 
     streamProgress(id: number): EventSource {
         return new EventSource(`${this.baseUrl}/jobs/${id}/progress`);
+    }
+
+    cancelJob(id: number): Observable<void> {
+        return this.http.post<void>(`${this.baseUrl}/jobs/${id}/cancel`, {});
+    }
+
+    // --- Live Recording Settings & Segments ---
+    getRecordingSettings(jobId: number): Observable<LiveStreamSettings> {
+        return this.http.get<LiveStreamSettings>(`${this.baseUrl}/jobs/${jobId}/recording-settings`);
+    }
+
+    updateRecordingSettings(jobId: number, settings: { chunkDurationMinutes?: number; retentionPeriodHours?: number }): Observable<LiveStreamSettings> {
+        return this.http.put<LiveStreamSettings>(`${this.baseUrl}/jobs/${jobId}/recording-settings`, settings);
+    }
+
+    getSegments(jobId: number): Observable<LiveStreamSegment[]> {
+        return this.http.get<LiveStreamSegment[]>(`${this.baseUrl}/jobs/${jobId}/segments`);
     }
 }

@@ -8,7 +8,7 @@ import java.time.LocalDateTime;
 public class TranscodeJob {
 
     public enum Status {
-        QUEUED, IN_PROGRESS, COMPLETED, FAILED
+        QUEUED, IN_PROGRESS, COMPLETED, FAILED, CANCELLED
     }
 
     @Id
@@ -18,14 +18,23 @@ public class TranscodeJob {
     @Column(nullable = false)
     private String inputFileName;
 
+    @Column(nullable = true)
+    private String inputUrl;
+
     @Column(nullable = false)
     private String outputFileName;
 
-    @Column(nullable = false)
-    private Long presetId;
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "transcode_job_presets", joinColumns = @JoinColumn(name = "job_id"))
+    @Column(name = "preset_id")
+    private java.util.List<Long> presetIds = new java.util.ArrayList<>();
+
+    // Keep this for backward UI compatibility or store combined names
+    @Column(nullable = true)
+    private String presetNames;
 
     @Column(nullable = false)
-    private String presetName;
+    private String outputFormat = "HLS"; // MP4, HLS, DASH
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
@@ -48,14 +57,20 @@ public class TranscodeJob {
     public String getInputFileName() { return inputFileName; }
     public void setInputFileName(String inputFileName) { this.inputFileName = inputFileName; }
 
+    public String getInputUrl() { return inputUrl; }
+    public void setInputUrl(String inputUrl) { this.inputUrl = inputUrl; }
+
     public String getOutputFileName() { return outputFileName; }
     public void setOutputFileName(String outputFileName) { this.outputFileName = outputFileName; }
 
-    public Long getPresetId() { return presetId; }
-    public void setPresetId(Long presetId) { this.presetId = presetId; }
+    public java.util.List<Long> getPresetIds() { return presetIds; }
+    public void setPresetIds(java.util.List<Long> presetIds) { this.presetIds = presetIds; }
 
-    public String getPresetName() { return presetName; }
-    public void setPresetName(String presetName) { this.presetName = presetName; }
+    public String getPresetNames() { return presetNames; }
+    public void setPresetNames(String presetNames) { this.presetNames = presetNames; }
+
+    public String getOutputFormat() { return outputFormat; }
+    public void setOutputFormat(String outputFormat) { this.outputFormat = outputFormat; }
 
     public Status getStatus() { return status; }
     public void setStatus(Status status) { this.status = status; }

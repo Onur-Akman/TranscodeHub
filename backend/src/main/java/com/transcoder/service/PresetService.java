@@ -1,50 +1,18 @@
 package com.transcoder.service;
 
 import com.transcoder.model.EncodingPreset;
-import com.transcoder.repository.PresetRepository;
-import org.springframework.stereotype.Service;
 
 import java.util.List;
 
-@Service
-public class PresetService {
+public interface PresetService {
 
-    private final PresetRepository presetRepository;
+    List<EncodingPreset> findAll();
 
-    public PresetService(PresetRepository presetRepository) {
-        this.presetRepository = presetRepository;
-    }
+    EncodingPreset findById(Long id);
 
-    public List<EncodingPreset> findAll() {
-        return presetRepository.findAll();
-    }
+    EncodingPreset create(EncodingPreset preset);
 
-    public EncodingPreset findById(Long id) {
-        return presetRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Preset not found with id: " + id));
-    }
+    EncodingPreset update(Long id, EncodingPreset updated);
 
-    public EncodingPreset create(EncodingPreset preset) {
-        return presetRepository.save(preset);
-    }
-
-    public EncodingPreset update(Long id, EncodingPreset updated) {
-        EncodingPreset existing = findById(id);
-        existing.setName(updated.getName());
-        existing.setVideoCodec(updated.getVideoCodec());
-        existing.setAudioCodec(updated.getAudioCodec());
-        existing.setResolution(updated.getResolution());
-        existing.setCrf(updated.getCrf());
-        existing.setMaxRate(updated.getMaxRate());
-        existing.setBufSize(updated.getBufSize());
-        existing.setAudioBitrate(updated.getAudioBitrate());
-        existing.setPreset(updated.getPreset());
-        existing.setFormat(updated.getFormat());
-        return presetRepository.save(existing);
-    }
-
-    public void delete(Long id) {
-        EncodingPreset existing = findById(id);
-        presetRepository.delete(existing);
-    }
+    void delete(Long id);
 }

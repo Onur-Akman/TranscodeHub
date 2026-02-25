@@ -4,10 +4,10 @@ import { FormsModule } from '@angular/forms';
 import { ApiService, EncodingPreset } from '../../services/api.service';
 
 @Component({
-    selector: 'app-preset-page',
-    standalone: true,
-    imports: [CommonModule, FormsModule],
-    template: `
+  selector: 'app-preset-page',
+  standalone: true,
+  imports: [CommonModule, FormsModule],
+  template: `
     <div class="animate-in">
       <div class="page-header">
         <h1>Encoding Presets</h1>
@@ -25,7 +25,6 @@ import { ApiService, EncodingPreset } from '../../services/api.service';
               <th>Resolution</th>
               <th>CRF</th>
               <th>Max Rate</th>
-              <th>Format</th>
               <th>Speed</th>
               <th>Actions</th>
             </tr>
@@ -38,7 +37,6 @@ import { ApiService, EncodingPreset } from '../../services/api.service';
               <td>{{ preset.resolution }}</td>
               <td>{{ preset.crf }}</td>
               <td>{{ preset.maxRate }}</td>
-              <td><span class="badge badge-purple">{{ preset.format | uppercase }}</span></td>
               <td>{{ preset.preset }}</td>
               <td class="cell-actions">
                 <button class="btn btn-secondary btn-sm" (click)="editPreset(preset)">Edit</button>
@@ -145,14 +143,6 @@ import { ApiService, EncodingPreset } from '../../services/api.service';
                 <option value="veryslow">Very Slow</option>
               </select>
             </div>
-            <div class="form-group">
-              <label>Output Format</label>
-              <select [(ngModel)]="form.format" name="format" required>
-                <option value="mp4">MP4</option>
-                <option value="mkv">MKV</option>
-                <option value="webm">WebM</option>
-              </select>
-            </div>
           </div>
           <div class="form-actions">
             <button type="submit" class="btn btn-primary" [disabled]="saving">
@@ -164,7 +154,7 @@ import { ApiService, EncodingPreset } from '../../services/api.service';
       </div>
     </div>
   `,
-    styles: [`
+  styles: [`
     .table-card { padding: 0; overflow: hidden; margin-bottom: 1.5rem; }
 
     .data-table {
@@ -225,37 +215,37 @@ import { ApiService, EncodingPreset } from '../../services/api.service';
   `]
 })
 export class PresetPageComponent implements OnInit {
-    presets: EncodingPreset[] = [];
-    editing = false;
-    editingId: number | null = null;
-    saving = false;
-    loading = true;
-    form: EncodingPreset = this.getDefaultForm();
+  presets: EncodingPreset[] = [];
+  editing = false;
+  editingId: number | null = null;
+  saving = false;
+  loading = true;
+  form: EncodingPreset = this.getDefaultForm();
 
-    constructor(private api: ApiService) { }
-    ngOnInit() { this.loadPresets(); }
+  constructor(private api: ApiService) { }
+  ngOnInit() { this.loadPresets(); }
 
-    getDefaultForm(): EncodingPreset {
-        return { name: '', videoCodec: 'libx264', audioCodec: 'aac', resolution: '1920x1080', crf: 23, maxRate: '4000k', bufSize: '8000k', audioBitrate: '128k', preset: 'fast', format: 'mp4' };
-    }
+  getDefaultForm(): EncodingPreset {
+    return { name: '', videoCodec: 'libx264', audioCodec: 'aac', resolution: '1920x1080', crf: 23, maxRate: '4000k', bufSize: '8000k', audioBitrate: '128k', preset: 'fast' };
+  }
 
-    loadPresets() {
-        this.loading = true;
-        this.api.getPresets().subscribe({ next: (p) => { this.presets = p; this.loading = false; }, error: () => this.loading = false });
-    }
+  loadPresets() {
+    this.loading = true;
+    this.api.getPresets().subscribe({ next: (p) => { this.presets = p; this.loading = false; }, error: () => this.loading = false });
+  }
 
-    getCodecLabel(codec: string): string {
-        const m: Record<string, string> = { 'libx264': 'H.264', 'libx265': 'H.265', 'libvpx-vp9': 'VP9' };
-        return m[codec] || codec;
-    }
+  getCodecLabel(codec: string): string {
+    const m: Record<string, string> = { 'libx264': 'H.264', 'libx265': 'H.265', 'libvpx-vp9': 'VP9' };
+    return m[codec] || codec;
+  }
 
-    savePreset() {
-        this.saving = true;
-        const obs = this.editing && this.editingId ? this.api.updatePreset(this.editingId, this.form) : this.api.createPreset(this.form);
-        obs.subscribe({ next: () => { this.saving = false; this.cancelEdit(); this.loadPresets(); }, error: () => this.saving = false });
-    }
+  savePreset() {
+    this.saving = true;
+    const obs = this.editing && this.editingId ? this.api.updatePreset(this.editingId, this.form) : this.api.createPreset(this.form);
+    obs.subscribe({ next: () => { this.saving = false; this.cancelEdit(); this.loadPresets(); }, error: () => this.saving = false });
+  }
 
-    editPreset(preset: EncodingPreset) { this.editing = true; this.editingId = preset.id!; this.form = { ...preset }; }
-    cancelEdit() { this.editing = false; this.editingId = null; this.form = this.getDefaultForm(); }
-    deletePreset(id: number) { if (confirm('Delete this preset?')) { this.api.deletePreset(id).subscribe(() => this.loadPresets()); } }
+  editPreset(preset: EncodingPreset) { this.editing = true; this.editingId = preset.id!; this.form = { ...preset }; }
+  cancelEdit() { this.editing = false; this.editingId = null; this.form = this.getDefaultForm(); }
+  deletePreset(id: number) { if (confirm('Delete this preset?')) { this.api.deletePreset(id).subscribe(() => this.loadPresets()); } }
 }

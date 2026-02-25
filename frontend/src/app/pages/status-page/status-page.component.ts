@@ -1,13 +1,14 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { ApiService, TranscodeJob } from '../../services/api.service';
+import { ApiService, TranscodeJob, LiveStreamSettings } from '../../services/api.service';
 
 @Component({
-    selector: 'app-status-page',
-    standalone: true,
-    imports: [CommonModule, RouterLink],
-    template: `
+  selector: 'app-status-page',
+  standalone: true,
+  imports: [CommonModule, FormsModule, RouterLink],
+  template: `
     <div class="animate-in">
       <div class="page-header">
         <h1>Dashboard</h1>
@@ -77,7 +78,8 @@ import { ApiService, TranscodeJob } from '../../services/api.service';
             <tr>
               <th>ID</th>
               <th>File Name</th>
-              <th>Preset</th>
+              <th>Qualities</th>
+              <th>Format</th>
               <th>Status</th>
               <th>Progress</th>
               <th>Time Stamp</th>
@@ -88,7 +90,12 @@ import { ApiService, TranscodeJob } from '../../services/api.service';
             <tr *ngFor="let job of jobs">
               <td class="cell-id">{{ job.id }}</td>
               <td class="cell-file">{{ job.inputFileName }}</td>
-              <td><span class="badge badge-info">{{ job.presetName }}</span></td>
+              <td>
+                <div style="display: flex; flex-direction: column; gap: 4px; align-items: flex-start;">
+                  <span class="badge badge-info" *ngFor="let pName of (job.presetNames || '').split(', ')">{{ pName }}</span>
+                </div>
+              </td>
+              <td><span class="badge" style="background-color: var(--secondary); color: white;">{{ job.outputFormat }}</span></td>
               <td>
                 <span class="badge" [ngClass]="getStatusBadgeClass(job.status)">
                   {{ formatStatus(job.status) }}
@@ -107,14 +114,31 @@ import { ApiService, TranscodeJob } from '../../services/api.service';
               </td>
               <td class="cell-date">{{ formatDate(job.createdAt) }}</td>
               <td>
-                <a *ngIf="job.status === 'COMPLETED'"
-                   [routerLink]="['/player', job.id]"
-                   class="btn btn-primary btn-sm">
-                  Watch
-                </a>
-                <span *ngIf="job.status === 'IN_PROGRESS'" class="status-dot pulse"></span>
-                <span *ngIf="job.status === 'FAILED'" class="text-danger">-</span>
-                <span *ngIf="job.status === 'QUEUED'" class="text-muted">-</span>
+                <div class="action-buttons">
+                  <button *ngIf="job.status === 'QUEUED' || job.status === 'IN_PROGRESS'"
+                          (click)="cancelJob(job.id)"
+                          class="btn btn-danger btn-sm">
+                    Cancel
+                  </button>
+                  <button *ngIf="job.inputFileName === 'LIVE_STREAM' && (job.status === 'IN_PROGRESS' || job.status === 'COMPLETED')"
+                          (click)="openEditModal(job)"
+                          class="btn btn-edit btn-sm">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                    </svg>
+                    Edit
+                  </button>
+                  <a *ngIf="(job.status === 'COMPLETED' && job.inputFileName !== 'LIVE_STREAM') || (job.status === 'IN_PROGRESS' && job.inputFileName === 'LIVE_STREAM')"
+                     [routerLink]="['/player', job.id]"
+                     class="btn btn-primary btn-sm">
+                    Watch
+                  </a>
+                  <span *ngIf="job.status === 'COMPLETED' && job.inputFileName === 'LIVE_STREAM'" class="text-muted">Ended</span>
+                  <span *ngIf="job.status === 'IN_PROGRESS' && job.inputFileName !== 'LIVE_STREAM'" class="status-dot pulse"></span>
+                  <span *ngIf="job.status === 'FAILED' || job.status === 'CANCELLED'" class="text-danger">-</span>
+                  <span *ngIf="job.status === 'QUEUED'" class="text-muted">-</span>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -133,9 +157,61 @@ import { ApiService, TranscodeJob } from '../../services/api.service';
         <h3>No jobs yet</h3>
         <p>Start a transcode job from the <a routerLink="/transcode">Transcode</a> page</p>
       </div>
+
+      <!-- Edit Recording Settings Modal -->
+      <div class="modal-overlay" *ngIf="editModalVisible" (click)="closeEditModal()">
+        <div class="modal-content animate-modal" (click)="$event.stopPropagation()">
+          <div class="modal-header">
+            <h3>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.83l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+              </svg>
+              Recording Settings
+            </h3>
+            <button class="modal-close" (click)="closeEditModal()">&times;</button>
+          </div>
+
+          <div class="modal-body" *ngIf="editSettings">
+            <div class="setting-group">
+              <label>Segment Duration</label>
+              <p class="setting-hint">How long each recording chunk will be</p>
+              <select [(ngModel)]="editSettings.chunkDurationMinutes" class="setting-select">
+                <option [ngValue]="1">1 minute (test)</option>
+                <option [ngValue]="5">5 minutes</option>
+                <option [ngValue]="10">10 minutes</option>
+                <option [ngValue]="15">15 minutes</option>
+                <option [ngValue]="30">30 minutes</option>
+                <option [ngValue]="60">1 hour</option>
+                <option [ngValue]="120">2 hours</option>
+              </select>
+            </div>
+
+            <div class="setting-group">
+              <label>Retention Period</label>
+              <p class="setting-hint">How long recordings will be kept before auto-deletion</p>
+              <select [(ngModel)]="editSettings.retentionPeriodHours" class="setting-select">
+                <option [ngValue]="1">1 hour</option>
+                <option [ngValue]="6">6 hours</option>
+                <option [ngValue]="24">1 day</option>
+                <option [ngValue]="72">3 days</option>
+                <option [ngValue]="168">7 days</option>
+                <option [ngValue]="720">30 days</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="modal-footer">
+            <button class="btn btn-secondary btn-sm" (click)="closeEditModal()">Cancel</button>
+            <button class="btn btn-primary btn-sm" (click)="saveSettings()" [disabled]="savingSettings">
+              {{ savingSettings ? 'Saving...' : 'Save Changes' }}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   `,
-    styles: [`
+  styles: [`
     .table-card { padding: 0; overflow: hidden; }
 
     .data-table {
@@ -215,6 +291,32 @@ import { ApiService, TranscodeJob } from '../../services/api.service';
       text-align: right;
     }
 
+    .action-buttons {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .btn-edit {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      padding: 0.35rem 0.75rem;
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+
+      &:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+      }
+    }
+
     .status-dot {
       display: inline-block;
       width: 8px;
@@ -245,96 +347,267 @@ import { ApiService, TranscodeJob } from '../../services/api.service';
       p { font-size: 0.88rem; }
       a { color: var(--primary); text-decoration: none; &:hover { text-decoration: underline; } }
     }
+
+    /* Modal Styles */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(4px);
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      animation: fadeIn 0.2s ease;
+    }
+
+    .modal-content {
+      background: white;
+      border-radius: 16px;
+      width: 440px;
+      max-width: 90vw;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+      overflow: hidden;
+    }
+
+    .animate-modal {
+      animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(20px) scale(0.97); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+
+      h3 {
+        margin: 0;
+        font-size: 1.05rem;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        color: var(--text-primary);
+      }
+    }
+
+    .modal-close {
+      background: none;
+      border: none;
+      font-size: 1.5rem;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 0 0.25rem;
+      line-height: 1;
+      transition: color 0.15s;
+
+      &:hover { color: var(--text-primary); }
+    }
+
+    .modal-body {
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    .setting-group {
+      label {
+        display: block;
+        font-size: 0.88rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 0.2rem;
+      }
+    }
+
+    .setting-hint {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin: 0 0 0.5rem 0;
+    }
+
+    .setting-select {
+      width: 100%;
+      padding: 0.65rem 0.85rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg-page, #f8fafc);
+      color: var(--text-primary);
+      font-size: 0.88rem;
+      cursor: pointer;
+      transition: border-color 0.2s;
+
+      &:focus {
+        outline: none;
+        border-color: var(--primary);
+        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+      }
+    }
+
+    .modal-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.75rem;
+      padding: 1rem 1.5rem;
+      border-top: 1px solid var(--border);
+      background: #f8fafc;
+    }
   `]
 })
 export class StatusPageComponent implements OnInit, OnDestroy {
-    jobs: TranscodeJob[] = [];
-    loading = true;
-    private eventSources: EventSource[] = [];
-    private refreshInterval: any;
+  jobs: TranscodeJob[] = [];
+  loading = true;
+  private eventSources: EventSource[] = [];
+  private refreshInterval: any;
 
-    constructor(private api: ApiService) { }
+  // Edit modal state
+  editModalVisible = false;
+  editJobId: number | null = null;
+  editSettings: LiveStreamSettings | null = null;
+  savingSettings = false;
 
-    ngOnInit() {
-        this.loadJobs();
-        this.refreshInterval = setInterval(() => this.loadJobs(), 5000);
+  constructor(private api: ApiService) { }
+
+  ngOnInit() {
+    this.loadJobs();
+    this.refreshInterval = setInterval(() => this.loadJobs(), 5000);
+  }
+
+  ngOnDestroy() {
+    this.closeAllEventSources();
+    if (this.refreshInterval) clearInterval(this.refreshInterval);
+  }
+
+  get completedCount(): number { return this.jobs.filter(j => j.status === 'COMPLETED').length; }
+  get inProgressCount(): number { return this.jobs.filter(j => j.status === 'IN_PROGRESS').length; }
+  get queuedCount(): number { return this.jobs.filter(j => j.status === 'QUEUED').length; }
+  get failedCount(): number { return this.jobs.filter(j => j.status === 'FAILED').length; }
+
+  loadJobs() {
+    this.api.getJobs().subscribe({
+      next: (jobs) => {
+        this.jobs = jobs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        this.loading = false;
+        this.subscribeToActiveJobs();
+      },
+      error: () => this.loading = false
+    });
+  }
+
+  private subscribeToActiveJobs() {
+    this.closeAllEventSources();
+    const active = this.jobs.filter(j => j.status === 'IN_PROGRESS' || j.status === 'QUEUED');
+    for (const job of active) {
+      const es = this.api.streamProgress(job.id);
+      es.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          const idx = this.jobs.findIndex(j => j.id === job.id);
+          if (idx >= 0) {
+            this.jobs[idx].progress = data.progress;
+            this.jobs[idx].status = data.status;
+            if (data.status === 'COMPLETED' || data.status === 'FAILED') es.close();
+          }
+        } catch (e) { }
+      };
+      es.onerror = () => es.close();
+      this.eventSources.push(es);
     }
+  }
 
-    ngOnDestroy() {
-        this.closeAllEventSources();
-        if (this.refreshInterval) clearInterval(this.refreshInterval);
+  private closeAllEventSources() {
+    this.eventSources.forEach(es => es.close());
+    this.eventSources = [];
+  }
+
+  getStatusBadgeClass(status: string): string {
+    const map: Record<string, string> = {
+      'COMPLETED': 'badge-success', 'IN_PROGRESS': 'badge-warning',
+      'FAILED': 'badge-danger', 'QUEUED': 'badge-info', 'CANCELLED': 'badge-danger'
+    };
+    return map[status] || '';
+  }
+
+  getProgressClass(status: string): string {
+    const map: Record<string, string> = {
+      'COMPLETED': 'completed', 'IN_PROGRESS': 'in-progress',
+      'FAILED': 'failed', 'QUEUED': 'queued', 'CANCELLED': 'failed'
+    };
+    return map[status] || '';
+  }
+
+  formatStatus(status: string): string {
+    return status.replace('_', ' ');
+  }
+
+  formatDate(dateStr: string): string {
+    if (!dateStr) return '-';
+    const d = new Date(dateStr);
+    const day = d.getDate().toString().padStart(2, '0');
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const mon = months[d.getMonth()];
+    const year = d.getFullYear();
+    const time = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }).toLowerCase();
+    return `${day}-${mon}-${year} | ${time}`;
+  }
+
+  cancelJob(id: number) {
+    if (confirm('Are you sure you want to cancel this job?')) {
+      this.api.cancelJob(id).subscribe({
+        next: () => this.loadJobs(),
+        error: (err) => alert('Failed to cancel job')
+      });
     }
+  }
 
-    get completedCount(): number { return this.jobs.filter(j => j.status === 'COMPLETED').length; }
-    get inProgressCount(): number { return this.jobs.filter(j => j.status === 'IN_PROGRESS').length; }
-    get queuedCount(): number { return this.jobs.filter(j => j.status === 'QUEUED').length; }
-    get failedCount(): number { return this.jobs.filter(j => j.status === 'FAILED').length; }
+  // --- Edit Modal ---
+  openEditModal(job: TranscodeJob) {
+    this.editJobId = job.id;
+    this.editModalVisible = true;
+    this.editSettings = null;
 
-    loadJobs() {
-        this.api.getJobs().subscribe({
-            next: (jobs) => {
-                this.jobs = jobs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-                this.loading = false;
-                this.subscribeToActiveJobs();
-            },
-            error: () => this.loading = false
-        });
-    }
+    this.api.getRecordingSettings(job.id).subscribe({
+      next: (settings) => this.editSettings = { ...settings },
+      error: () => {
+        this.editSettings = { jobId: job.id, chunkDurationMinutes: 30, retentionPeriodHours: 168 };
+      }
+    });
+  }
 
-    private subscribeToActiveJobs() {
-        this.closeAllEventSources();
-        const active = this.jobs.filter(j => j.status === 'IN_PROGRESS' || j.status === 'QUEUED');
-        for (const job of active) {
-            const es = this.api.streamProgress(job.id);
-            es.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    const idx = this.jobs.findIndex(j => j.id === job.id);
-                    if (idx >= 0) {
-                        this.jobs[idx].progress = data.progress;
-                        this.jobs[idx].status = data.status;
-                        if (data.status === 'COMPLETED' || data.status === 'FAILED') es.close();
-                    }
-                } catch (e) { }
-            };
-            es.onerror = () => es.close();
-            this.eventSources.push(es);
-        }
-    }
+  closeEditModal() {
+    this.editModalVisible = false;
+    this.editJobId = null;
+    this.editSettings = null;
+  }
 
-    private closeAllEventSources() {
-        this.eventSources.forEach(es => es.close());
-        this.eventSources = [];
-    }
+  saveSettings() {
+    if (!this.editSettings || !this.editJobId) return;
+    this.savingSettings = true;
 
-    getStatusBadgeClass(status: string): string {
-        const map: Record<string, string> = {
-            'COMPLETED': 'badge-success', 'IN_PROGRESS': 'badge-warning',
-            'FAILED': 'badge-danger', 'QUEUED': 'badge-info'
-        };
-        return map[status] || '';
-    }
-
-    getProgressClass(status: string): string {
-        const map: Record<string, string> = {
-            'COMPLETED': 'completed', 'IN_PROGRESS': 'in-progress',
-            'FAILED': 'failed', 'QUEUED': 'queued'
-        };
-        return map[status] || '';
-    }
-
-    formatStatus(status: string): string {
-        return status.replace('_', ' ');
-    }
-
-    formatDate(dateStr: string): string {
-        if (!dateStr) return '-';
-        const d = new Date(dateStr);
-        const day = d.getDate().toString().padStart(2, '0');
-        const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-        const mon = months[d.getMonth()];
-        const year = d.getFullYear();
-        const time = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }).toLowerCase();
-        return `${day}-${mon}-${year} | ${time}`;
-    }
+    this.api.updateRecordingSettings(this.editJobId, {
+      chunkDurationMinutes: this.editSettings.chunkDurationMinutes,
+      retentionPeriodHours: this.editSettings.retentionPeriodHours
+    }).subscribe({
+      next: () => {
+        this.savingSettings = false;
+        this.closeEditModal();
+      },
+      error: () => {
+        this.savingSettings = false;
+        alert('Failed to save settings');
+      }
+    });
+  }
 }

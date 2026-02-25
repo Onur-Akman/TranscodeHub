@@ -62,6 +62,15 @@ import { filter } from 'rxjs';
             </div>
             <span>Transcode</span>
           </a>
+          <a routerLink="/live-stream" routerLinkActive="active" class="nav-item">
+            <div class="nav-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M23 7l-7 5 7 5V7z"></path>
+                <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+              </svg>
+            </div>
+            <span>Live Stream</span>
+          </a>
         </nav>
       </aside>
 
@@ -139,6 +148,7 @@ import { filter } from 'rxjs';
     .main-content {
       flex: 1; margin-left: var(--sidebar-width);
       padding: 0 2rem 1.75rem; min-height: 100vh; background: var(--bg-page);
+      min-width: 0; overflow-x: hidden;
     }
 
     .top-bar {

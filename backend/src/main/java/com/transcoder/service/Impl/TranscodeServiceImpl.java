@@ -1,11 +1,13 @@
 package com.transcoder.service.Impl;
 
 import com.transcoder.dto.TranscodeRequest;
+import com.transcoder.dto.UploadResponse;
 import com.transcoder.model.EncodingPreset;
 import com.transcoder.model.TranscodeJob;
 import com.transcoder.repository.JobRepository;
 import com.transcoder.repository.PresetRepository;
 import com.transcoder.service.FFmpegService;
+import com.transcoder.service.LiveRecordingService;
 import com.transcoder.service.TranscodeService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -26,6 +28,7 @@ public class TranscodeServiceImpl implements TranscodeService {
     private final JobRepository jobRepository;
     private final PresetRepository presetRepository;
     private final FFmpegService ffmpegService;
+    private final LiveRecordingService liveRecordingService;
 
     @Value("${app.videos.input-dir}")
     private String inputDir;
@@ -37,10 +40,11 @@ public class TranscodeServiceImpl implements TranscodeService {
             ".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv", ".wmv", ".m4v"
     );
 
-    public TranscodeServiceImpl(JobRepository jobRepository, PresetRepository presetRepository, FFmpegService ffmpegService) {
+    public TranscodeServiceImpl(JobRepository jobRepository, PresetRepository presetRepository, FFmpegService ffmpegService, LiveRecordingService liveRecordingService) {
         this.jobRepository = jobRepository;
         this.presetRepository = presetRepository;
         this.ffmpegService = ffmpegService;
+        this.liveRecordingService = liveRecordingService;
     }
 
     @Override
@@ -57,7 +61,7 @@ public class TranscodeServiceImpl implements TranscodeService {
     }
 
     @Override
-    public Map<String, String> uploadVideo(MultipartFile file) throws IOException {
+    public UploadResponse uploadVideo(MultipartFile file) throws IOException {
         if (file.isEmpty()) {
             throw new IllegalArgumentException("File is empty");
         }
@@ -66,33 +70,74 @@ public class TranscodeServiceImpl implements TranscodeService {
         String fileName = file.getOriginalFilename();
         Path targetPath = uploadDir.resolve(fileName);
         file.transferTo(targetPath.toFile());
-        return Map.of("fileName", fileName, "message", "Upload successful");
+        return new UploadResponse("Upload successful", fileName);
     }
 
     @Override
     public TranscodeJob startTranscode(TranscodeRequest request) {
-        EncodingPreset preset = presetRepository.findById(request.getPresetId())
-                .orElseThrow(() -> new IllegalArgumentException("Preset not found"));
-
-        File inputFile = new File(inputDir, request.getInputFileName());
-        if (!inputFile.exists()) {
-            throw new IllegalArgumentException("Input file not found: " + request.getInputFileName());
+        if (request.getInputFileName() == null && request.getInputUrl() == null) {
+            throw new IllegalArgumentException("Either inputFileName or inputUrl must be provided");
         }
 
-        String baseName = request.getInputFileName().replaceFirst("\\.[^.]+$", "");
-        String outputFileName = baseName + "_" + preset.getName() + "." + preset.getFormat();
+        if (request.getPresetIds() == null || request.getPresetIds().isEmpty()) {
+            throw new IllegalArgumentException("At least one preset must be selected");
+        }
+
+        List<EncodingPreset> presets = presetRepository.findAllById(request.getPresetIds());
+        if (presets.isEmpty()) {
+            throw new IllegalArgumentException("Presets not found");
+        }
+
+        String baseName;
+        if (request.getInputFileName() != null) {
+            File inputFile = new File(inputDir, request.getInputFileName());
+            if (!inputFile.exists()) {
+                throw new IllegalArgumentException("Input file not found: " + request.getInputFileName());
+            }
+            baseName = request.getInputFileName().replaceFirst("\\.[^.]+$", "");
+        } else {
+            baseName = "stream_" + System.currentTimeMillis();
+        }
+
+        // The output is now a directory (for HLS/DASH) or a file (if MP4 and only 1 preset)
+        String outputFileName;
+        if ("MP4".equalsIgnoreCase(request.getOutputFormat())) {
+            outputFileName = baseName + "_" + presets.get(0).getName() + ".mp4";
+        } else {
+            // For HLS or DASH, output is usually a folder or a master playlist 
+            // We can name the main entrypoint: baseName/master.m3u8 or baseName/manifest.mpd
+            String ext = "DASH".equalsIgnoreCase(request.getOutputFormat()) ? "manifest.mpd" : "master.m3u8";
+            outputFileName = baseName + "_multi/" + ext;
+        }
 
         TranscodeJob job = new TranscodeJob();
-        job.setInputFileName(request.getInputFileName());
+        if (request.getInputFileName() != null) {
+            job.setInputFileName(request.getInputFileName());
+        } else {
+            job.setInputFileName("LIVE_STREAM"); // Placeholder as column is non-nullable
+            job.setInputUrl(request.getInputUrl());
+        }
+        
         job.setOutputFileName(outputFileName);
-        job.setPresetId(preset.getId());
-        job.setPresetName(preset.getName());
+        job.setPresetIds(request.getPresetIds());
+        
+        // Comma separated names for UI display
+        String presetNames = presets.stream().map(EncodingPreset::getName).reduce((a, b) -> a + ", " + b).orElse("");
+        job.setPresetNames(presetNames);
+        job.setOutputFormat(request.getOutputFormat());
+        
         job.setStatus(TranscodeJob.Status.QUEUED);
         job.setProgress(0);
         job.setCreatedAt(LocalDateTime.now());
         job = jobRepository.save(job);
 
-        ffmpegService.runTranscode(job, preset);
+        ffmpegService.runTranscode(job, presets);
+
+        // Start recording for live streams
+        if ("LIVE_STREAM".equals(job.getInputFileName())) {
+            liveRecordingService.startRecording(job);
+        }
+
         return job;
     }
 
@@ -111,5 +156,22 @@ public class TranscodeServiceImpl implements TranscodeService {
     public SseEmitter streamProgress(Long id) {
 
         throw new UnsupportedOperationException("Bu gorevi daha vermediler de kalsın ");
+    }
+
+    @Override
+    public void cancelJob(Long id) {
+        TranscodeJob job = getJob(id);
+        if (job.getStatus() == TranscodeJob.Status.QUEUED || job.getStatus() == TranscodeJob.Status.IN_PROGRESS) {
+            ffmpegService.cancelTranscode(job);
+
+            // Stop recording if it was a live stream
+            if ("LIVE_STREAM".equals(job.getInputFileName())) {
+                liveRecordingService.stopRecording(id);
+            }
+
+            job.setStatus(TranscodeJob.Status.CANCELLED);
+            job.setErrorMessage("Job was cancelled by the user");
+            jobRepository.save(job);
+        }
     }
 }
