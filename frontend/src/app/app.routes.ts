@@ -34,6 +34,11 @@ export const routes: Routes = [
         canActivate: [authGuard]
     },
     {
+        path: 'cms',
+        loadComponent: () => import('./pages/cms-page/cms-page.component').then(m => m.CmsPageComponent),
+        canActivate: [authGuard]
+    },
+    {
         path: 'player/:jobId',
         loadComponent: () => import('./pages/player-page/player-page.component').then(m => m.PlayerPageComponent),
         canActivate: [authGuard]

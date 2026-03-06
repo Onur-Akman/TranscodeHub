@@ -6,22 +6,22 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 @Entity
-@Table(name = "live_stream_settings")
+@Table(name = "cms_subtitles")
 @Getter
 @Setter
 @NoArgsConstructor
-public class LiveStreamSettings {
+public class CmsSubtitle {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false, unique = true)
-    private Long jobId;
+    @Column(nullable = false)
+    private String movieImdbId;
 
     @Column(nullable = false)
-    private Integer chunkDurationMinutes = 30;
+    private String language;
 
     @Column(nullable = false)
-    private Integer retentionPeriodHours = 168;
+    private String fileName;
 }

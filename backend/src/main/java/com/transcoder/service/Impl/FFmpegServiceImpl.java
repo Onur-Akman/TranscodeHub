@@ -8,6 +8,7 @@ import com.transcoder.model.EncodingPreset;
 import com.transcoder.model.TranscodeJob;
 import com.transcoder.repository.JobRepository;
 import com.transcoder.service.FFmpegService;
+import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -21,6 +22,7 @@ import java.util.List;
 import java.util.ArrayList;
 
 @Service
+@RequiredArgsConstructor
 public class FFmpegServiceImpl implements FFmpegService {
 
     private final JobRepository jobRepository;
@@ -31,10 +33,6 @@ public class FFmpegServiceImpl implements FFmpegService {
 
     @Value("${app.videos.output-dir}")
     private String outputDir;
-
-    public FFmpegServiceImpl(JobRepository jobRepository) {
-        this.jobRepository = jobRepository;
-    }
 
     @Override
     public double getVideoDuration(String inputPath) {
@@ -67,8 +65,7 @@ public class FFmpegServiceImpl implements FFmpegService {
 
         double totalDuration = isLive ? 0 : getVideoDuration(inputPath);
         
-        // Immediately set the job to IN_PROGRESS so the frontend shows the Watch button.
-        // The frontend player handles the 404 gracefully with a retry loop until the stream is ready.
+       
         job.setStatus(TranscodeJob.Status.IN_PROGRESS);
         jobRepository.save(job);
 

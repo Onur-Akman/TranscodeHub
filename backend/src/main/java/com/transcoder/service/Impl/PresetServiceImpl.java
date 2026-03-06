@@ -3,18 +3,16 @@ package com.transcoder.service.Impl;
 import com.transcoder.model.EncodingPreset;
 import com.transcoder.repository.PresetRepository;
 import com.transcoder.service.PresetService;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 
 @Service
+@RequiredArgsConstructor
 public class PresetServiceImpl implements PresetService {
 
     private final PresetRepository presetRepository;
-
-    public PresetServiceImpl(PresetRepository presetRepository) {
-        this.presetRepository = presetRepository;
-    }
 
     @Override
     public List<EncodingPreset> findAll() {

@@ -7,6 +7,7 @@ import com.transcoder.repository.JobRepository;
 import com.transcoder.repository.LiveStreamSegmentRepository;
 import com.transcoder.repository.LiveStreamSettingsRepository;
 import com.transcoder.service.LiveRecordingService;
+import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -24,6 +25,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Service
+@RequiredArgsConstructor
 public class LiveRecordingServiceImpl implements LiveRecordingService {
 
     private final LiveStreamSettingsRepository settingsRepository;
@@ -33,23 +35,13 @@ public class LiveRecordingServiceImpl implements LiveRecordingService {
     @Value("${app.videos.output-dir}")
     private String outputDir;
 
-    // Active recording processes per job ID
     private final Map<Long, Process> activeRecordingProcesses = new ConcurrentHashMap<>();
 
-    // Pattern to parse segment filenames like: rec_<jobId>_2026-02-24_09-30-00.mp4
     private static final Pattern SEGMENT_FILENAME_PATTERN =
             Pattern.compile("rec_(\\d+)_(\\d{4}-\\d{2}-\\d{2}_\\d{2}-\\d{2}-\\d{2})\\.mp4");
 
     private static final DateTimeFormatter SEGMENT_DATE_FORMAT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
-
-    public LiveRecordingServiceImpl(LiveStreamSettingsRepository settingsRepository,
-                                     LiveStreamSegmentRepository segmentRepository,
-                                     JobRepository jobRepository) {
-        this.settingsRepository = settingsRepository;
-        this.segmentRepository = segmentRepository;
-        this.jobRepository = jobRepository;
-    }
 
     @Override
     public void startRecording(TranscodeJob job) {
@@ -84,15 +76,15 @@ public class LiveRecordingServiceImpl implements LiveRecordingService {
             Process process = pb.start();
             activeRecordingProcesses.put(job.getId(), process);
 
-            // Log output in background thread
+
             new Thread(() -> {
                 try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
                     String line;
                     while ((line = reader.readLine()) != null) {
-                        // Silently consume FFmpeg output
+
                     }
                 } catch (Exception e) {
-                    // Ignore
+
                 }
             }, "rec-logger-" + job.getId()).start();
 
@@ -110,7 +102,7 @@ public class LiveRecordingServiceImpl implements LiveRecordingService {
         if (process != null && process.isAlive()) {
             process.destroy();
             try {
-                // Give it a moment to finish writing
+
                 process.waitFor(java.util.concurrent.TimeUnit.SECONDS.toMillis(5),
                         java.util.concurrent.TimeUnit.MILLISECONDS);
             } catch (InterruptedException e) {
@@ -122,12 +114,12 @@ public class LiveRecordingServiceImpl implements LiveRecordingService {
             System.out.println("Stopped recording for job " + jobId);
         }
 
-        // Also try to kill any lingering ffmpeg processes for this recording
+
         try {
             String pattern = "rec_" + jobId + "_";
             Runtime.getRuntime().exec(new String[]{"pkill", "-f", pattern});
         } catch (Exception e) {
-            // Ignore
+
         }
     }
 
@@ -141,7 +133,7 @@ public class LiveRecordingServiceImpl implements LiveRecordingService {
 
         stopRecording(jobId);
 
-        // Small delay to let FFmpeg fully terminate
+
         try { Thread.sleep(1000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
 
         startRecording(job);
@@ -173,7 +165,7 @@ public class LiveRecordingServiceImpl implements LiveRecordingService {
 
         settings = settingsRepository.save(settings);
 
-        // If chunk duration changed, restart the recording process with new settings
+
         if (chunkChanged && activeRecordingProcesses.containsKey(jobId)) {
             restartRecording(jobId);
         }
@@ -186,11 +178,6 @@ public class LiveRecordingServiceImpl implements LiveRecordingService {
         return segmentRepository.findByJobIdOrderByStartTimeAsc(jobId);
     }
 
-    /**
-     * Scheduled task: scan recording directories for new completed segments and add to DB.
-     * Also enforce retention policies.
-     * Runs every 30 seconds.
-     */
     @Scheduled(fixedRate = 30000)
     public void scanAndCleanSegments() {
         File recordingsRoot = new File(outputDir + "/recordings");
@@ -200,7 +187,7 @@ public class LiveRecordingServiceImpl implements LiveRecordingService {
         if (jobDirs == null) return;
 
         for (File jobDir : jobDirs) {
-            String dirName = jobDir.getName(); // e.g. "job_42"
+            String dirName = jobDir.getName(); 
             if (!dirName.startsWith("job_")) continue;
 
             Long jobId;
@@ -210,28 +197,26 @@ public class LiveRecordingServiceImpl implements LiveRecordingService {
                 continue;
             }
 
-            // Discover new segment files
+
             File[] segmentFiles = jobDir.listFiles((dir, name) -> name.endsWith(".mp4") && name.startsWith("rec_"));
             if (segmentFiles == null) continue;
 
             for (File segFile : segmentFiles) {
-                // Skip if already in DB
+
                 if (segmentRepository.existsByFileName(segFile.getName())) continue;
 
-                // Skip files currently being written (if still recording, the last file may be in progress)
-                // A simple heuristic: skip files modified in the last 5 seconds
                 if (System.currentTimeMillis() - segFile.lastModified() < 5000) continue;
 
-                // Parse filename to get start time
+
                 Matcher matcher = SEGMENT_FILENAME_PATTERN.matcher(segFile.getName());
                 if (!matcher.matches()) continue;
 
                 try {
                     LocalDateTime startTime = LocalDateTime.parse(matcher.group(2), SEGMENT_DATE_FORMAT);
 
-                    // Get duration via ffprobe
+
                     double duration = probeDuration(segFile.getAbsolutePath());
-                    // Skip files that are still writing or tiny init segments (e.g. 0.04s)
+
                     if (duration < 2) continue;
 
                     LocalDateTime endTime = startTime.plusSeconds((long) duration);
@@ -252,7 +237,7 @@ public class LiveRecordingServiceImpl implements LiveRecordingService {
                 }
             }
 
-            // Enforce retention policy
+
             Optional<LiveStreamSettings> settingsOpt = settingsRepository.findByJobId(jobId);
             if (settingsOpt.isPresent()) {
                 int retentionHours = settingsOpt.get().getRetentionPeriodHours();
@@ -261,7 +246,7 @@ public class LiveRecordingServiceImpl implements LiveRecordingService {
                 List<LiveStreamSegment> allSegments = segmentRepository.findByJobIdOrderByStartTimeAsc(jobId);
                 for (LiveStreamSegment seg : allSegments) {
                     if (seg.getStartTime().isBefore(cutoff)) {
-                        // Delete file
+
                         File f = new File(jobDir, seg.getFileName());
                         if (f.exists()) {
                             f.delete();
@@ -274,9 +259,6 @@ public class LiveRecordingServiceImpl implements LiveRecordingService {
         }
     }
 
-    /**
-     * Get video duration in seconds using ffprobe.
-     */
     private double probeDuration(String filePath) {
         try {
             ProcessBuilder pb = new ProcessBuilder(
