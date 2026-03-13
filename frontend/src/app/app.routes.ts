@@ -29,6 +29,11 @@ export const routes: Routes = [
         canActivate: [authGuard]
     },
     {
+        path: 'live-stream',
+        loadComponent: () => import('./pages/live-stream-page/live-stream-page.component').then(m => m.LiveStreamPageComponent),
+        canActivate: [authGuard]
+    },
+    {
         path: 'player/:jobId',
         loadComponent: () => import('./pages/player-page/player-page.component').then(m => m.PlayerPageComponent),
         canActivate: [authGuard]
