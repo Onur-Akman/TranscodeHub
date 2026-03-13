@@ -1,8 +1,12 @@
 package com.transcoder.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
 
 @Schema(description = "Login response")
+@Getter
+@AllArgsConstructor
 public class LoginResponse {
 
     @Schema(description = "JWT token", example = "eyJhbGciOiJIUzI1NiJ9...")
@@ -13,14 +17,4 @@ public class LoginResponse {
 
     @Schema(description = "User role", example = "ADMIN")
     private String role;
-
-    public LoginResponse(String token, String username, String role) {
-        this.token = token;
-        this.username = username;
-        this.role = role;
-    }
-
-    public String getToken() { return token; }
-    public String getUsername() { return username; }
-    public String getRole() { return role; }
 }

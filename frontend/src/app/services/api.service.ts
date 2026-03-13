@@ -120,4 +120,62 @@ export class ApiService {
     getSegments(jobId: number): Observable<LiveStreamSegment[]> {
         return this.http.get<LiveStreamSegment[]>(`${this.baseUrl}/jobs/${jobId}/segments`);
     }
+
+    // --- CMS Movies ---
+    getAllCmsMovies(): Observable<any[]> {
+        return this.http.get<any[]>(`${this.baseUrl}/cms/movies`);
+    }
+
+    getCmsMovie(imdbId: string): Observable<any> {
+        return this.http.get<any>(`${this.baseUrl}/cms/movies/${imdbId}`);
+    }
+
+    saveCmsMovie(data: any): Observable<any> {
+        return this.http.post<any>(`${this.baseUrl}/cms/movies`, data);
+    }
+
+    uploadCmsPoster(imdbId: string, file: File): Observable<any> {
+        const formData = new FormData();
+        formData.append('file', file);
+        return this.http.post<any>(`${this.baseUrl}/cms/movies/${imdbId}/poster`, formData);
+    }
+
+    // --- CMS Subtitles ---
+    getSubtitles(imdbId: string): Observable<any[]> {
+        return this.http.get<any[]>(`${this.baseUrl}/cms/movies/${imdbId}/subtitles`);
+    }
+
+    uploadSubtitle(imdbId: string, file: File, language: string): Observable<any> {
+        const formData = new FormData();
+        formData.append('file', file);
+        return this.http.post<any>(`${this.baseUrl}/cms/movies/${imdbId}/subtitles?language=${encodeURIComponent(language)}`, formData);
+    }
+
+    deleteSubtitle(id: number): Observable<void> {
+        return this.http.delete<void>(`${this.baseUrl}/cms/subtitles/${id}`);
+    }
+
+    // --- CMS Dubs ---
+    getDubs(imdbId: string): Observable<any[]> {
+        return this.http.get<any[]>(`${this.baseUrl}/cms/movies/${imdbId}/dubs`);
+    }
+
+    uploadDub(imdbId: string, file: File, language: string): Observable<any> {
+        const formData = new FormData();
+        formData.append('file', file);
+        return this.http.post<any>(`${this.baseUrl}/cms/movies/${imdbId}/dubs?language=${encodeURIComponent(language)}`, formData);
+    }
+
+    deleteDub(id: number): Observable<void> {
+        return this.http.delete<void>(`${this.baseUrl}/cms/dubs/${id}`);
+    }
+
+    // --- CMS Directory Listings ---
+    getSubtitleFiles(): Observable<string[]> {
+        return this.http.get<string[]>(`${this.baseUrl}/cms/subtitle-files`);
+    }
+
+    getDubFiles(): Observable<string[]> {
+        return this.http.get<string[]>(`${this.baseUrl}/cms/dub-files`);
+    }
 }

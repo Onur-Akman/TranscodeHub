@@ -1,0 +1,344 @@
+<div class="animate-in">
+  <div class="page-header">
+    <h1>CMS</h1>
+    <p>Browse and manage movie content from OMDB</p>
+  </div>
+
+  <!-- Search Section -->
+  <div class="cms-search-section card">
+    <div class="search-row">
+      <div class="search-group">
+        <div class="search-input-wrap">
+          <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input type="text" [(ngModel)]="searchQuery" placeholder="Search movies by title..."
+            (keyup.enter)="searchMovies()" class="search-input" />
+        </div>
+        <button class="btn btn-primary" (click)="searchMovies()" [disabled]="searching">{{ searching ? 'Searching...' :
+          'Search' }}</button>
+      </div>
+      <div class="divider-line"></div>
+      <div class="search-group">
+        <div class="search-input-wrap">
+          <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+            <circle cx="12" cy="7" r="4"></circle>
+          </svg>
+          <input type="text" [(ngModel)]="imdbIdQuery" placeholder="Enter IMDb ID (e.g. tt0111161)"
+            (keyup.enter)="searchByImdbId()" class="search-input" />
+        </div>
+        <button class="btn btn-accent" (click)="searchByImdbId()" [disabled]="searching">Fetch</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Banners -->
+  <div class="error-banner" *ngIf="errorMessage">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="10"></circle>
+      <line x1="15" y1="9" x2="9" y2="15"></line>
+      <line x1="9" y1="9" x2="15" y2="15"></line>
+    </svg>
+    {{ errorMessage }}
+  </div>
+  <div class="success-banner" *ngIf="successMessage">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <polyline points="20 6 9 17 4 12"></polyline>
+    </svg>
+    {{ successMessage }}
+  </div>
+
+  <!-- Loading -->
+  <div class="loading-state" *ngIf="searching">
+    <div class="spinner"></div>
+    <p>Fetching movies...</p>
+  </div>
+
+  <!-- Movies Grid -->
+  <div class="movies-grid" *ngIf="!searching && movies.length > 0">
+    <div class="movie-card" *ngFor="let movie of movies; let i = index" [style.animation-delay]="(i * 0.05) + 's'"
+      (click)="openMovieDetail(movie)">
+      <div class="poster-wrap">
+        <img [src]="getMoviePoster(movie)" [alt]="movie.Title" class="poster-img" loading="lazy" />
+        <div class="edited-badge" *ngIf="movieOverrides[movie.imdbID]">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
+          Edited
+        </div>
+        <div class="poster-overlay">
+          <div class="overlay-btns">
+            <button *ngIf="isAdmin" class="overlay-btn edit-btn" (click)="onEditClick($event, movie)">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+              </svg>
+              Edit
+            </button>
+            <button class="overlay-btn watch-btn" (click)="onWatchClick($event, movie)">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+              </svg>
+              Watch
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="movie-info">
+        <h3 class="movie-title">{{ getMovieTitle(movie) }}</h3>
+        <div class="movie-meta">
+          <span class="movie-year">{{ getMovieYear(movie) }}</span>
+          <span class="movie-type badge badge-info">{{ movie.Type }}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Empty State -->
+  <div class="empty-card card" *ngIf="!searching && movies.length === 0 && !errorMessage">
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+      <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect>
+      <line x1="7" y1="2" x2="7" y2="22"></line>
+      <line x1="17" y1="2" x2="17" y2="22"></line>
+      <line x1="2" y1="12" x2="22" y2="12"></line>
+    </svg>
+    <h3>Search for movies</h3>
+    <p>Use the search bar above to find movies by title or IMDb ID</p>
+  </div>
+
+  <!-- READ-ONLY Detail Modal -->
+  <div class="modal-overlay" *ngIf="selectedMovie && !editMode" (click)="closeDetail()">
+    <div class="modal-content detail-modal animate-modal" (click)="$event.stopPropagation()">
+      <div class="modal-header">
+        <h3><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect>
+            <line x1="7" y1="2" x2="7" y2="22"></line>
+            <line x1="17" y1="2" x2="17" y2="22"></line>
+            <line x1="2" y1="12" x2="22" y2="12"></line>
+          </svg> Movie Details</h3>
+        <button class="modal-close" (click)="closeDetail()">&times;</button>
+      </div>
+      <div class="modal-body detail-body" *ngIf="movieDetail">
+        <div class="detail-layout">
+          <div class="detail-poster"><img
+              [src]="movieDetail.Poster !== 'N/A' ? movieDetail.Poster : 'https://via.placeholder.com/300x450?text=No+Poster'"
+              [alt]="movieDetail.Title" /></div>
+          <div class="detail-info">
+            <h2>{{ movieDetail.Title }}</h2>
+            <div class="detail-badges">
+              <span class="badge badge-info">{{ movieDetail.Year }}</span>
+              <span class="badge badge-purple" *ngIf="movieDetail.Rated">{{ movieDetail.Rated }}</span>
+              <span class="badge badge-warning" *ngIf="movieDetail.imdbRating && movieDetail.imdbRating !== 'N/A'">⭐ {{
+                movieDetail.imdbRating }}</span>
+            </div>
+            <div class="detail-row" *ngIf="movieDetail.Runtime && movieDetail.Runtime !== 'N/A'"><span
+                class="detail-label">Runtime</span><span class="detail-value">{{ movieDetail.Runtime }}</span></div>
+            <div class="detail-row" *ngIf="movieDetail.Genre && movieDetail.Genre !== 'N/A'"><span
+                class="detail-label">Genre</span><span class="detail-value">{{ movieDetail.Genre }}</span></div>
+            <div class="detail-row" *ngIf="movieDetail.Director && movieDetail.Director !== 'N/A'"><span
+                class="detail-label">Director</span><span class="detail-value">{{ movieDetail.Director }}</span></div>
+            <div class="detail-row" *ngIf="movieDetail.Actors && movieDetail.Actors !== 'N/A'"><span
+                class="detail-label">Cast</span><span class="detail-value">{{ movieDetail.Actors }}</span></div>
+            <p class="detail-plot" *ngIf="movieDetail.Plot && movieDetail.Plot !== 'N/A'">{{ movieDetail.Plot }}</p>
+            <div class="detail-imdb"><span class="imdb-id">{{ movieDetail.imdbID }}</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-loading" *ngIf="!movieDetail">
+        <div class="spinner"></div>
+        <p>Loading details...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- EDITABLE Detail Modal (Admin) -->
+  <div class="modal-overlay" *ngIf="selectedMovie && editMode" (click)="closeDetail()">
+    <div class="modal-content detail-modal edit-modal animate-modal" (click)="$event.stopPropagation()">
+      <div class="modal-header edit-header">
+        <h3><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+          </svg> Edit Movie</h3>
+        <button class="modal-close" (click)="closeDetail()">&times;</button>
+      </div>
+      <div class="modal-body" *ngIf="editData">
+        <div class="edit-layout">
+          <!-- Poster -->
+          <div class="edit-poster-section">
+            <div class="edit-poster-preview" (click)="posterInput.click()">
+              <img
+                [src]="posterPreviewUrl || (editData.Poster && editData.Poster !== 'N/A' ? editData.Poster : 'https://via.placeholder.com/300x450?text=No+Poster')"
+                [alt]="editData.Title" />
+              <div class="poster-change-overlay">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                  <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                  <polyline points="21 15 16 10 5 21"></polyline>
+                </svg>
+                <span>Change Poster</span>
+              </div>
+            </div>
+            <input type="file" #posterInput accept="image/*" (change)="onPosterFileSelected($event)"
+              style="display:none" />
+            <div class="poster-file-info" *ngIf="selectedPosterFile">✓ {{ selectedPosterFile.name }}</div>
+            <div class="form-group"><label>Poster URL</label><input type="text" [(ngModel)]="editData.Poster"
+                placeholder="Or enter URL" /></div>
+          </div>
+
+          <!-- Fields -->
+          <div class="edit-fields">
+            <div class="form-group"><label>Title</label><input type="text" [(ngModel)]="editData.Title" /></div>
+            <div class="form-row-2">
+              <div class="form-group"><label>Year</label><input type="text" [(ngModel)]="editData.Year" /></div>
+              <div class="form-group"><label>Rated</label><input type="text" [(ngModel)]="editData.Rated" /></div>
+            </div>
+            <div class="form-row-2">
+              <div class="form-group"><label>Runtime</label><input type="text" [(ngModel)]="editData.Runtime" /></div>
+              <div class="form-group"><label>IMDb Rating</label><input type="text" [(ngModel)]="editData.imdbRating" />
+              </div>
+            </div>
+            <div class="form-group"><label>Genre</label><input type="text" [(ngModel)]="editData.Genre" /></div>
+            <div class="form-group"><label>Director</label><input type="text" [(ngModel)]="editData.Director" /></div>
+            <div class="form-group"><label>Cast</label><input type="text" [(ngModel)]="editData.Actors" /></div>
+            <div class="form-group"><label>Released</label><input type="text" [(ngModel)]="editData.Released" /></div>
+            <div class="form-group"><label>Plot</label><textarea [(ngModel)]="editData.Plot" rows="3"></textarea></div>
+            <div class="form-group"><label>IMDb ID</label><input type="text" [(ngModel)]="editData.imdbID"
+                class="input-mono" readonly /></div>
+
+            <!-- Video & Preset Section -->
+            <div class="media-section">
+              <h4 class="section-title">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="23 7 16 12 23 17 23 7"></polygon>
+                  <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                </svg>
+                Video & Encoding
+              </h4>
+              <div class="form-group">
+                <label>Video File</label>
+                <div class="input-row">
+                  <select [(ngModel)]="editVideoFileName" class="flex-input">
+                    <option value="">Select video...</option>
+                    <option *ngFor="let v of inputVideos" [value]="v">{{ v }}</option>
+                  </select>
+                  <label class="btn btn-secondary btn-xs upload-label">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                      <polyline points="17 8 12 3 7 8"></polyline>
+                      <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                    Upload
+                    <input type="file" accept="video/*" (change)="onVideoFileSelected($event)" hidden />
+                  </label>
+                </div>
+                <div class="upload-msg" *ngIf="uploadingVideo">Uploading {{ uploadVideoName }}...</div>
+              </div>
+              <div class="form-group">
+                <label>Encoding Preset</label>
+                <select [(ngModel)]="editPresetId">
+                  <option [ngValue]="null">Select preset...</option>
+                  <option *ngFor="let p of presets" [ngValue]="p.id">{{ p.name }} — {{ getCodecLabel(p.videoCodec) }} {{
+                    p.resolution }}</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Subtitles Section -->
+            <div class="media-section">
+              <h4 class="section-title">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="1" y="3" width="22" height="18" rx="2" ry="2"></rect>
+                  <line x1="1" y1="15" x2="23" y2="15"></line>
+                </svg>
+                Subtitles
+              </h4>
+              <div class="media-list" *ngIf="subtitles.length > 0">
+                <div class="media-item" *ngFor="let s of subtitles">
+                  <span class="media-lang badge badge-info">{{ s.language }}</span>
+                  <span class="media-file">{{ s.fileName }}</span>
+                  <button class="media-remove" (click)="deleteSubtitle(s.id)" title="Remove">×</button>
+                </div>
+              </div>
+              <div class="existing-files-row" *ngIf="subtitleFiles.length > 0">
+                <label class="existing-label">From server (input/subtitles):</label>
+                <select class="existing-select" #subFileSelect>
+                  <option value="">Select existing file...</option>
+                  <option *ngFor="let f of subtitleFiles" [value]="f">{{ f }}</option>
+                </select>
+              </div>
+              <div class="media-upload-row">
+                <input type="text" [(ngModel)]="subtitleLang" placeholder="Language (e.g. Turkish)"
+                  class="media-lang-input" />
+                <label class="btn btn-secondary btn-xs">
+                  {{ subtitleFile ? subtitleFile.name : 'Choose .srt / .vtt' }}
+                  <input type="file" accept=".srt,.vtt,.ass,.sub" (change)="onSubtitleFileSelected($event)" hidden />
+                </label>
+                <button class="btn btn-success btn-xs" (click)="uploadSubtitle()"
+                  [disabled]="uploadingSub || !subtitleFile || !subtitleLang.trim()">
+                  {{ uploadingSub ? 'Uploading...' : 'Add' }}
+                </button>
+              </div>
+            </div>
+
+            <!-- Dubbing Section -->
+            <div class="media-section">
+              <h4 class="section-title">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M9 18V5l12-2v13"></path>
+                  <circle cx="6" cy="18" r="3"></circle>
+                  <circle cx="18" cy="16" r="3"></circle>
+                </svg>
+                Dubbing
+              </h4>
+              <div class="media-list" *ngIf="dubs.length > 0">
+                <div class="media-item" *ngFor="let d of dubs">
+                  <span class="media-lang badge badge-purple">{{ d.language }}</span>
+                  <span class="media-file">{{ d.fileName }}</span>
+                  <button class="media-remove" (click)="deleteDub(d.id)" title="Remove">×</button>
+                </div>
+              </div>
+              <div class="existing-files-row" *ngIf="dubFiles.length > 0">
+                <label class="existing-label">From server (input/dub):</label>
+                <select class="existing-select" #dubFileSelect>
+                  <option value="">Select existing file...</option>
+                  <option *ngFor="let f of dubFiles" [value]="f">{{ f }}</option>
+                </select>
+              </div>
+              <div class="media-upload-row">
+                <input type="text" [(ngModel)]="dubLang" placeholder="Language (e.g. English)"
+                  class="media-lang-input" />
+                <label class="btn btn-secondary btn-xs">
+                  {{ dubFile ? dubFile.name : 'Choose audio file' }}
+                  <input type="file" accept="audio/*" (change)="onDubFileSelected($event)" hidden />
+                </label>
+                <button class="btn btn-success btn-xs" (click)="uploadDub()"
+                  [disabled]="uploadingDub || !dubFile || !dubLang.trim()">
+                  {{ uploadingDub ? 'Uploading...' : 'Add' }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" (click)="closeDetail()">Cancel</button>
+        <button class="btn btn-success btn-sm" (click)="saveEdits()" [disabled]="saving">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+            <polyline points="17 21 17 13 7 13 7 21"></polyline>
+            <polyline points="7 3 7 8 15 8"></polyline>
+          </svg>
+          {{ saving ? 'Saving...' : 'Save Changes' }}
+        </button>
+      </div>
+      <div class="detail-loading" *ngIf="!editData">
+        <div class="spinner"></div>
+        <p>Loading...</p>
+      </div>
+    </div>
+  </div>
+</div>

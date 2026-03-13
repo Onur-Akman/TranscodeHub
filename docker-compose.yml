@@ -20,6 +20,7 @@ services:
     volumes:
       - ./videos/input:/app/videos/input
       - ./videos/output:/app/videos/output
+      - ./posters:/app/posters
     environment:
       - SPRING_PROFILES_ACTIVE=docker
     depends_on:

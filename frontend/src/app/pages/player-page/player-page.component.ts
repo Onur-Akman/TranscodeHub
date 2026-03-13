@@ -26,26 +26,44 @@ const shaka: any = shakaExport;
 
       <div class="player-section" *ngIf="job && (job.status === 'COMPLETED' || (job.status === 'IN_PROGRESS' && job.inputFileName === 'LIVE_STREAM'))">
         <div class="video-wrapper card">
-          <video #videoPlayer controls autoplay [src]="nativeVideoUrl" 
+          <video #videoPlayer controls autoplay [attr.src]="nativeVideoUrl || null" 
                  [class.live-stream]="job?.inputFileName === 'LIVE_STREAM' && !playingSegment"
                  (error)="onVideoError()" preload="metadata">
             Your browser does not support the video tag.
           </video>
           
-          <div class="quality-overlay" *ngIf="qualities.length > 0">
+          <div class="quality-overlay">
             <button class="gear-btn" (click)="toggleQualityMenu()" title="Settings">
               <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
                 <path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.06-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.73,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.06,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.49-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z" />
               </svg>
             </button>
             <div class="quality-menu" *ngIf="showQualityMenu">
-              <div class="menu-header">Quality</div>
-              <ul class="quality-list">
+              <div class="menu-header" *ngIf="qualities.length > 0">Quality</div>
+              <ul class="quality-list" *ngIf="qualities.length > 0">
                 <li [class.active]="selectedQuality === -1" (click)="onQualitySelect(-1)">
                   <span class="check" *ngIf="selectedQuality === -1">✓</span> Auto
                 </li>
                 <li *ngFor="let q of qualities" [class.active]="selectedQuality === q.id" (click)="onQualitySelect(q.id)">
                   <span class="check" *ngIf="selectedQuality === q.id">✓</span> {{ q.label }}
+                </li>
+              </ul>
+              <div class="menu-header" *ngIf="subtitles.length > 0">Subtitles</div>
+              <ul class="quality-list" *ngIf="subtitles.length > 0">
+                <li [class.active]="selectedSubtitle === null" (click)="onSubtitleSelect(null)">
+                  <span class="check" *ngIf="selectedSubtitle === null">✓</span> Off
+                </li>
+                <li *ngFor="let s of subtitles; let i = index" [class.active]="selectedSubtitle === i" (click)="onSubtitleSelect(i)">
+                  <span class="check" *ngIf="selectedSubtitle === i">✓</span> {{ s.language }}
+                </li>
+              </ul>
+              <div class="menu-header" *ngIf="dubs.length > 0">Dubbing</div>
+              <ul class="quality-list" *ngIf="dubs.length > 0">
+                <li [class.active]="selectedDub === null" (click)="onDubSelect(null)">
+                  <span class="check" *ngIf="selectedDub === null">✓</span> Original
+                </li>
+                <li *ngFor="let d of dubs; let i = index" [class.active]="selectedDub === i" (click)="onDubSelect(i)">
+                  <span class="check" *ngIf="selectedDub === i">✓</span> {{ d.language }}
                 </li>
               </ul>
             </div>
@@ -352,7 +370,21 @@ const shaka: any = shakaExport;
   `]
 })
 export class PlayerPageComponent implements OnInit, AfterViewInit, OnDestroy {
-  @ViewChild('videoPlayer') videoElement!: ElementRef<HTMLVideoElement>;
+  private _videoElement: ElementRef<HTMLVideoElement> | undefined;
+
+  @ViewChild('videoPlayer') set videoElement(el: ElementRef<HTMLVideoElement>) {
+    if (this._videoElement?.nativeElement === el?.nativeElement) return;
+
+    this._videoElement = el;
+    if (el && this.job) {
+      this.initPlayer();
+    }
+  }
+
+  get videoElement(): ElementRef<HTMLVideoElement> | undefined {
+    return this._videoElement;
+  }
+
   job: TranscodeJob | null = null;
   loading = true;
   videoError = false;
@@ -370,6 +402,13 @@ export class PlayerPageComponent implements OnInit, AfterViewInit, OnDestroy {
   playingSegmentId: number | null = null;
   private segmentRefreshInterval: any;
 
+  // Subtitles & Dubs
+  subtitles: any[] = [];
+  dubs: any[] = [];
+  selectedSubtitle: number | null = null;
+  selectedDub: number | null = null;
+  private dubAudio: HTMLAudioElement | null = null;
+
   constructor(private route: ActivatedRoute, private api: ApiService) { }
 
   get isLiveStream(): boolean {
@@ -378,6 +417,18 @@ export class PlayerPageComponent implements OnInit, AfterViewInit, OnDestroy {
 
   ngOnInit() {
     const id = Number(this.route.snapshot.paramMap.get('jobId'));
+    const imdbId = this.route.snapshot.queryParamMap.get('imdbId');
+
+    // Load subtitles & dubs if imdbId is provided
+    if (imdbId) {
+      this.api.getSubtitles(imdbId).subscribe(s => {
+        this.subtitles = s;
+        // Add tracks programmatically after they load
+        setTimeout(() => this.addSubtitleTracks(), 500);
+      });
+      this.api.getDubs(imdbId).subscribe(d => this.dubs = d);
+    }
+
     if (id) {
       this.api.getJob(id).subscribe({
         next: (j) => {
@@ -388,8 +439,7 @@ export class PlayerPageComponent implements OnInit, AfterViewInit, OnDestroy {
           if (url && !url.endsWith('.m3u8') && !url.endsWith('.mpd')) {
             this.nativeVideoUrl = url;
           }
-          // Load Player manually
-          setTimeout(() => this.initPlayer(), 0);
+          // The ViewChild setter now auto-triggers initPlayer when el is ready
 
           // Load segments for live streams
           if (this.isLiveStream) {
@@ -403,7 +453,7 @@ export class PlayerPageComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   ngAfterViewInit() {
-    this.initPlayer();
+    // The ViewChild setter handles initPlayer() when videoElement is ready
   }
 
   ngOnDestroy() {
@@ -417,6 +467,10 @@ export class PlayerPageComponent implements OnInit, AfterViewInit, OnDestroy {
       this.shakaPlayer = null;
     }
     if (this.segmentRefreshInterval) clearInterval(this.segmentRefreshInterval);
+    if (this.dubAudio) {
+      this.dubAudio.pause();
+      this.dubAudio = null;
+    }
   }
 
   loadSegments() {
@@ -428,12 +482,14 @@ export class PlayerPageComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   private initPlayer() {
+    console.log('initPlayer called', { job: !!this.job, videoElement: !!this.videoElement });
     this.qualities = [];
     this.selectedQuality = -1;
 
     if (!this.job || !this.videoElement) return;
 
     const url = this.getVideoUrl();
+    console.log('getVideoUrl returned', url);
     if (!url) return;
 
     const video = this.videoElement.nativeElement;
@@ -441,6 +497,7 @@ export class PlayerPageComponent implements OnInit, AfterViewInit, OnDestroy {
     if (this.retryTimeoutId) clearTimeout(this.retryTimeoutId);
 
     if (url.endsWith('.m3u8')) {
+      console.log('Initializing HLS.js for', url);
       this.initHlsJs(url, video);
     } else if (url.endsWith('.mpd')) {
       this.initShaka(url, video);
@@ -451,6 +508,7 @@ export class PlayerPageComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   private initHlsJs(url: string, video: HTMLVideoElement) {
+    console.log('Hls.isSupported:', Hls.isSupported());
     if (Hls.isSupported()) {
       if (this.hls) this.hls.destroy();
 
@@ -580,7 +638,8 @@ export class PlayerPageComponent implements OnInit, AfterViewInit, OnDestroy {
   onVideoError() {
     if (this.job?.inputFileName === 'LIVE_STREAM' && !this.playingSegment) {
       this.triggerRetry();
-    } else {
+    } else if (this.nativeVideoUrl) {
+      // Only set error if we had a real src (not HLS.js managed)
       this.videoError = true;
     }
   }
@@ -627,5 +686,120 @@ export class PlayerPageComponent implements OnInit, AfterViewInit, OnDestroy {
   formatSegmentTime(dateStr: string): string {
     const d = new Date(dateStr);
     return d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  // --- Subtitle & Dub Selection ---
+  addSubtitleTracks() {
+    if (!this.videoElement || this.subtitles.length === 0) return;
+    const video = this.videoElement.nativeElement;
+
+    // Add crossOrigin attribute to allow blob URLs to work properly with native tracks
+    if (!video.crossOrigin) video.crossOrigin = 'anonymous';
+
+    // Remove any existing tracks
+    const existing = video.querySelectorAll('track');
+    existing.forEach((t: HTMLTrackElement) => t.remove());
+
+    // Add new tracks
+    for (const s of this.subtitles) {
+      if (s.fileName.endsWith('.srt')) {
+        // Fetch SRT, decode intelligently, convert to VTT, create ObjectURL
+        fetch(`/api/cms/subtitles/file/${s.fileName}`)
+          .then(res => res.arrayBuffer())
+          .then(buffer => {
+            let text = '';
+            try {
+              // Try standard UTF-8 first. Throw an error if invalid characters exist.
+              text = new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+            } catch (e) {
+              // Fallback to standard Turkish ANSI encoding if UTF-8 fails
+              text = new TextDecoder('windows-1254').decode(buffer);
+            }
+            const vttText = this.srtToVtt(text);
+            const blob = new Blob([vttText], { type: 'text/vtt' });
+            const url = URL.createObjectURL(blob);
+            this.appendSubtitleTrack(video, url, s.language);
+          })
+          .catch(e => console.error('Error fetching/converting subtitle', e));
+      } else {
+        // Assume VTT or other natively supported format
+        this.appendSubtitleTrack(video, `/api/cms/subtitles/file/${s.fileName}`, s.language);
+      }
+    }
+  }
+
+  private appendSubtitleTrack(video: HTMLVideoElement, url: string, language: string) {
+    const track = document.createElement('track');
+    track.kind = 'subtitles';
+    track.src = url;
+    track.srclang = language;
+    track.label = language;
+    // By default, text tracks added this way need mode explicitly initialized
+    // though appending should set mode to 'disabled' by default.
+    video.appendChild(track);
+    console.log(`[Player] Added subtitle track: lang=${language}, src=${url.substring(0, 30)}...`);
+  }
+
+  private srtToVtt(srt: string): string {
+    let vtt = 'WEBVTT\n\n';
+    vtt += srt
+      .replace(/\r\n|\r|\n/g, '\n') // Normalize newlines
+      .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2') // Fix timestamps: 00:00:00,000 -> 00:00:00.000
+      .replace(/\n\n+/g, '\n\n'); // Clean up excessive whitespaces
+    return vtt;
+  }
+
+  onSubtitleSelect(index: number | null) {
+    console.log('[Player] Subtitle selected:', index);
+    this.selectedSubtitle = index;
+    this.showQualityMenu = false;
+    if (!this.videoElement) return;
+    const video = this.videoElement.nativeElement;
+
+    const selectedLang = index !== null && this.subtitles[index] ? this.subtitles[index].language : null;
+    const tracks = video.textTracks;
+
+    console.log('[Player] Total tracks currently on video:', tracks.length);
+    for (let i = 0; i < tracks.length; i++) {
+      const t = tracks[i];
+      if (t.kind === 'subtitles' || t.kind === 'captions') {
+        const wantsShowing = selectedLang && t.language === selectedLang;
+        t.mode = wantsShowing ? 'showing' : 'hidden';
+        console.log(`[Player] Track ${i} (${t.language}) mode set to ${t.mode}`);
+      }
+    }
+  }
+
+  onDubSelect(index: number | null) {
+    this.selectedDub = index;
+    this.showQualityMenu = false;
+    if (!this.videoElement) return;
+    const video = this.videoElement.nativeElement;
+
+    // Stop existing dub audio
+    if (this.dubAudio) {
+      this.dubAudio.pause();
+      this.dubAudio = null;
+    }
+
+    if (index === null) {
+      // Restore original audio
+      video.muted = false;
+      return;
+    }
+
+    const dub = this.dubs[index];
+    if (!dub) return;
+
+    // Mute original and play dub audio synced
+    video.muted = true;
+    this.dubAudio = new Audio(`/api/cms/dubs/file/${dub.fileName}`);
+    this.dubAudio.currentTime = video.currentTime;
+    this.dubAudio.play().catch(() => { });
+
+    // Sync dub audio with video
+    video.addEventListener('play', () => { this.dubAudio?.play().catch(() => { }); });
+    video.addEventListener('pause', () => { this.dubAudio?.pause(); });
+    video.addEventListener('seeked', () => { if (this.dubAudio) this.dubAudio.currentTime = video.currentTime; });
   }
 }

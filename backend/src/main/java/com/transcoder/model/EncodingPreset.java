@@ -3,10 +3,16 @@ package com.transcoder.model;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.*;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 @Entity
 @Table(name = "encoding_presets")
 @Schema(description = "Video encoding preset configuration")
+@Getter
+@Setter
+@NoArgsConstructor
 public class EncodingPreset {
 
     @Id
@@ -59,35 +65,4 @@ public class EncodingPreset {
     @Column(nullable = false)
     @Schema(description = "Encoding speed preset", example = "medium")
     private String preset;
-
-    // Getters and setters
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
-
-    public String getName() { return name; }
-    public void setName(String name) { this.name = name; }
-
-    public String getVideoCodec() { return videoCodec; }
-    public void setVideoCodec(String videoCodec) { this.videoCodec = videoCodec; }
-
-    public String getAudioCodec() { return audioCodec; }
-    public void setAudioCodec(String audioCodec) { this.audioCodec = audioCodec; }
-
-    public String getResolution() { return resolution; }
-    public void setResolution(String resolution) { this.resolution = resolution; }
-
-    public Integer getCrf() { return crf; }
-    public void setCrf(Integer crf) { this.crf = crf; }
-
-    public String getMaxRate() { return maxRate; }
-    public void setMaxRate(String maxRate) { this.maxRate = maxRate; }
-
-    public String getBufSize() { return bufSize; }
-    public void setBufSize(String bufSize) { this.bufSize = bufSize; }
-
-    public String getAudioBitrate() { return audioBitrate; }
-    public void setAudioBitrate(String audioBitrate) { this.audioBitrate = audioBitrate; }
-
-    public String getPreset() { return preset; }
-    public void setPreset(String preset) { this.preset = preset; }
 }

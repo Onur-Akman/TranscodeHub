@@ -9,6 +9,7 @@ import com.transcoder.repository.PresetRepository;
 import com.transcoder.service.FFmpegService;
 import com.transcoder.service.LiveRecordingService;
 import com.transcoder.service.TranscodeService;
+import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -23,6 +24,7 @@ import java.time.LocalDateTime;
 import java.util.*;
 
 @Service
+@RequiredArgsConstructor
 public class TranscodeServiceImpl implements TranscodeService {
 
     private final JobRepository jobRepository;
@@ -39,13 +41,6 @@ public class TranscodeServiceImpl implements TranscodeService {
     private static final Set<String> SUPPORTED_EXTENSIONS = Set.of(
             ".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv", ".wmv", ".m4v"
     );
-
-    public TranscodeServiceImpl(JobRepository jobRepository, PresetRepository presetRepository, FFmpegService ffmpegService, LiveRecordingService liveRecordingService) {
-        this.jobRepository = jobRepository;
-        this.presetRepository = presetRepository;
-        this.ffmpegService = ffmpegService;
-        this.liveRecordingService = liveRecordingService;
-    }
 
     @Override
     public List<String> listInputVideos() {
@@ -99,7 +94,7 @@ public class TranscodeServiceImpl implements TranscodeService {
             baseName = "stream_" + System.currentTimeMillis();
         }
 
-        // The output is now a directory (for HLS/DASH) or a file (if MP4 and only 1 preset)
+
         String outputFileName;
         if ("MP4".equalsIgnoreCase(request.getOutputFormat())) {
             outputFileName = baseName + "_" + presets.get(0).getName() + ".mp4";
@@ -155,7 +150,7 @@ public class TranscodeServiceImpl implements TranscodeService {
     @Override
     public SseEmitter streamProgress(Long id) {
 
-        throw new UnsupportedOperationException("Bu gorevi daha vermediler de kalsın ");
+        throw new UnsupportedOperationException("Streaming progress not supported");
     }
 
     @Override
@@ -164,7 +159,6 @@ public class TranscodeServiceImpl implements TranscodeService {
         if (job.getStatus() == TranscodeJob.Status.QUEUED || job.getStatus() == TranscodeJob.Status.IN_PROGRESS) {
             ffmpegService.cancelTranscode(job);
 
-            // Stop recording if it was a live stream
             if ("LIVE_STREAM".equals(job.getInputFileName())) {
                 liveRecordingService.stopRecording(id);
             }
