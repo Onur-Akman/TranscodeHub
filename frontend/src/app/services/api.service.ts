@@ -178,4 +178,21 @@ export class ApiService {
     getDubFiles(): Observable<string[]> {
         return this.http.get<string[]>(`${this.baseUrl}/cms/dub-files`);
     }
+
+    // --- Watch Party ---
+    getWatchPartyMovies(): Observable<any[]> {
+        return this.http.get<any[]>(`${this.baseUrl}/watch-party/movies`);
+    }
+
+    createWatchPartyRoom(movieImdbId: string, transcodeJobId: number): Observable<any> {
+        return this.http.post<any>(`${this.baseUrl}/watch-party/rooms`, { movieImdbId, transcodeJobId });
+    }
+
+    getWatchPartyRoom(roomId: string): Observable<any> {
+        return this.http.get<any>(`${this.baseUrl}/watch-party/rooms/${roomId}`);
+    }
+
+    getActiveWatchPartyRooms(): Observable<any[]> {
+        return this.http.get<any[]>(`${this.baseUrl}/watch-party/rooms`);
+    }
 }

@@ -34,6 +34,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/auth/users").hasRole("ADMIN")
                 .requestMatchers("/api/cms/subtitles/file/**", "/api/cms/dubs/file/**").permitAll()
                 .requestMatchers("/api/cms/posters/**").permitAll()
+                .requestMatchers("/ws/**").permitAll()
                 .requestMatchers("/api/**").authenticated()
                 .anyRequest().permitAll()
             )
