@@ -1,5 +1,5 @@
 # Stage 1: Build with Maven
-FROM maven:3.9-eclipse-temurin-17 AS builder
+FROM maven:3.9-eclipse-temurin-25 AS builder
 WORKDIR /build
 COPY backend/pom.xml .
 RUN mvn dependency:go-offline -B -Dmaven.wagon.http.retryHandler.count=3 -Dmaven.wagon.httpconnectionManager.ttlSeconds=120
@@ -7,7 +7,7 @@ COPY backend/src ./src
 RUN mvn clean package -DskipTests -B -Dmaven.wagon.http.retryHandler.count=3 -Dmaven.wagon.httpconnectionManager.ttlSeconds=120
 
 # Stage 2: Runtime (Alpine-based — ARM64 support + reliable mirrors)
-FROM amazoncorretto:17-alpine
+FROM amazoncorretto:25-alpine
 WORKDIR /app
 
 # Install FFmpeg and required tools for Shaka Packager (curl, gcompat for glibc compatibility on alpine)
