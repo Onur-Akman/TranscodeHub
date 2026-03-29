@@ -179,7 +179,6 @@ export class ApiService {
         return this.http.get<string[]>(`${this.baseUrl}/cms/dub-files`);
     }
 
-    // --- Watch Party ---
     getWatchPartyMovies(): Observable<any[]> {
         return this.http.get<any[]>(`${this.baseUrl}/watch-party/movies`);
     }

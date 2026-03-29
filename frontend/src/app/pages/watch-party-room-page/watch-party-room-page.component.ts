@@ -49,6 +49,16 @@ export class WatchPartyRoomPageComponent implements OnInit, AfterViewInit, OnDes
   playRejectedMsg = '';
   private playRejectedTimer: any;
 
+  // Subtitles & Dubs
+  subtitles: any[] = [];
+  dubs: any[] = [];
+  selectedSubtitle: number | null = null;
+  selectedDub: number | null = null;
+  private dubAudio: HTMLAudioElement | null = null;
+  showSettingsMenu = false;
+  qualities: { id: number; label: string }[] = [];
+  selectedQuality: number = -1;
+
   // Share
   shareLink = '';
   copied = false;
@@ -70,6 +80,13 @@ export class WatchPartyRoomPageComponent implements OnInit, AfterViewInit, OnDes
         next: (room) => {
           this.room = room;
           this.loading = false;
+          if (room.movieImdbId) {
+            this.api.getSubtitles(room.movieImdbId).subscribe(s => {
+              this.subtitles = s;
+              setTimeout(() => this.addSubtitleTracks(), 1000);
+            });
+            this.api.getDubs(room.movieImdbId).subscribe(d => this.dubs = d);
+          }
         },
         error: () => {
           this.error = 'Room not found';
@@ -103,6 +120,7 @@ export class WatchPartyRoomPageComponent implements OnInit, AfterViewInit, OnDes
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.lockTimer) clearInterval(this.lockTimer);
     if (this.playRejectedTimer) clearTimeout(this.playRejectedTimer);
+    if (this.dubAudio) { this.dubAudio.pause(); this.dubAudio = null; }
   }
 
   // ===================== VIDEO PLAYER =====================
@@ -137,6 +155,14 @@ export class WatchPartyRoomPageComponent implements OnInit, AfterViewInit, OnDes
     this.hls = new Hls({ debug: false });
     this.hls.loadSource(url);
     this.hls.attachMedia(video);
+
+    this.hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
+      this.zone.run(() => {
+        this.qualities = data.levels.map((l, i) => ({
+          id: i, label: `${l.height}p (${Math.round(l.bitrate / 1024)}k)`
+        })).sort((a, b) => b.id - a.id);
+      });
+    });
   }
 
   private shouldIgnore(): boolean {
@@ -379,6 +405,111 @@ export class WatchPartyRoomPageComponent implements OnInit, AfterViewInit, OnDes
     } else {
       this.lockRemainingSeconds = 0;
     }
+  }
+
+  // ===================== SETTINGS (Quality / Subtitles / Dubs) =====================
+
+  toggleSettingsMenu() {
+    this.showSettingsMenu = !this.showSettingsMenu;
+  }
+
+  onQualitySelect(q: number) {
+    this.selectedQuality = q;
+    this.showSettingsMenu = false;
+    if (!this.hls) return;
+    this.hls.currentLevel = q; // -1 = auto
+  }
+
+  addSubtitleTracks() {
+    const video = this.videoRef?.nativeElement;
+    if (!video || this.subtitles.length === 0) return;
+
+    if (!video.crossOrigin) video.crossOrigin = 'anonymous';
+
+    const existing = video.querySelectorAll('track');
+    existing.forEach((t: HTMLTrackElement) => t.remove());
+
+    for (const s of this.subtitles) {
+      if (s.fileName.endsWith('.srt')) {
+        fetch(`/api/cms/subtitles/file/${s.fileName}`)
+          .then(res => res.arrayBuffer())
+          .then(buffer => {
+            let text = '';
+            try {
+              text = new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+            } catch {
+              text = new TextDecoder('windows-1254').decode(buffer);
+            }
+            const vttText = this.srtToVtt(text);
+            const blob = new Blob([vttText], { type: 'text/vtt' });
+            const url = URL.createObjectURL(blob);
+            this.appendSubtitleTrack(video, url, s.language);
+          })
+          .catch(() => {});
+      } else {
+        this.appendSubtitleTrack(video, `/api/cms/subtitles/file/${s.fileName}`, s.language);
+      }
+    }
+  }
+
+  private appendSubtitleTrack(video: HTMLVideoElement, url: string, language: string) {
+    const track = document.createElement('track');
+    track.kind = 'subtitles';
+    track.src = url;
+    track.srclang = language;
+    track.label = language;
+    video.appendChild(track);
+  }
+
+  private srtToVtt(srt: string): string {
+    let vtt = 'WEBVTT\n\n';
+    vtt += srt
+      .replace(/\r\n|\r|\n/g, '\n')
+      .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2')
+      .replace(/\n\n+/g, '\n\n');
+    return vtt;
+  }
+
+  onSubtitleSelect(index: number | null) {
+    this.selectedSubtitle = index;
+    this.showSettingsMenu = false;
+    const video = this.videoRef?.nativeElement;
+    if (!video) return;
+
+    const selectedLang = index !== null && this.subtitles[index] ? this.subtitles[index].language : null;
+    const tracks = video.textTracks;
+    for (let i = 0; i < tracks.length; i++) {
+      const t = tracks[i];
+      if (t.kind === 'subtitles' || t.kind === 'captions') {
+        t.mode = (selectedLang && t.language === selectedLang) ? 'showing' : 'hidden';
+      }
+    }
+  }
+
+  onDubSelect(index: number | null) {
+    this.selectedDub = index;
+    this.showSettingsMenu = false;
+    const video = this.videoRef?.nativeElement;
+    if (!video) return;
+
+    if (this.dubAudio) { this.dubAudio.pause(); this.dubAudio = null; }
+
+    if (index === null) {
+      video.muted = false;
+      return;
+    }
+
+    const dub = this.dubs[index];
+    if (!dub) return;
+
+    video.muted = true;
+    this.dubAudio = new Audio(`/api/cms/dubs/file/${dub.fileName}`);
+    this.dubAudio.currentTime = video.currentTime;
+    this.dubAudio.play().catch(() => {});
+
+    video.addEventListener('play', () => { this.dubAudio?.play().catch(() => {}); });
+    video.addEventListener('pause', () => { this.dubAudio?.pause(); });
+    video.addEventListener('seeked', () => { if (this.dubAudio) this.dubAudio.currentTime = video.currentTime; });
   }
 
   // ===================== CHAT =====================

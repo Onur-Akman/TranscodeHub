@@ -1,8 +1,9 @@
-package com.transcoder.service;
+package com.transcoder.service.Impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.transcoder.config.JwtUtil;
-import org.springframework.stereotype.Component;
+import com.transcoder.service.WatchPartySocketService;
+import org.springframework.stereotype.Service;
 import org.springframework.web.socket.*;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 import org.springframework.web.util.UriComponentsBuilder;
@@ -11,15 +12,15 @@ import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
 
-@Component
-public class WatchPartyWebSocketHandler extends TextWebSocketHandler {
+@Service
+public class WatchPartySocketServiceImpl extends TextWebSocketHandler implements WatchPartySocketService {
 
     private final JwtUtil jwtUtil;
     private final ObjectMapper mapper = new ObjectMapper();
     private final ConcurrentHashMap<String, RoomState> rooms = new ConcurrentHashMap<>();
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
-    public WatchPartyWebSocketHandler(JwtUtil jwtUtil) {
+    public WatchPartySocketServiceImpl(JwtUtil jwtUtil) {
         this.jwtUtil = jwtUtil;
         scheduler.scheduleAtFixedRate(this::broadcastSync, 3, 3, TimeUnit.SECONDS);
     }
@@ -126,7 +127,7 @@ public class WatchPartyWebSocketHandler extends TextWebSocketHandler {
         room.isPlaying = false;
         room.lastStateChangeTime = now;
         room.pausedByUser = username;
-        room.pauseLockUntil = now + 120_000; // 2 minutes
+        room.pauseLockUntil = now + 120_000;
         room.readyUsers.clear();
 
         broadcast(room, Map.of(
@@ -214,6 +215,7 @@ public class WatchPartyWebSocketHandler extends TextWebSocketHandler {
             broadcast(room, syncMsg, null);
         }
     }
+
 
     private void broadcast(RoomState room, Map<String, Object> msg, WebSocketSession exclude) {
         String json;

@@ -28,6 +28,7 @@ export class CmsPageComponent implements OnInit {
   editMode = false; editData: OmdbDetailResult | null = null; saving = false;
   selectedPosterFile: File | null = null; posterPreviewUrl: string | null = null;
   movieOverrides: Record<string, any> = {};
+  filterMode: 'all' | 'uploaded' = 'all'; filterOpen = false;
 
   // Media fields
   inputVideos: string[] = []; presets: EncodingPreset[] = [];
@@ -69,6 +70,19 @@ export class CmsPageComponent implements OnInit {
   getMovieTitle(movie: OmdbMovie): string { return this.movieOverrides[movie.imdbID]?.title || movie.Title; }
   getMovieYear(movie: OmdbMovie): string { return this.movieOverrides[movie.imdbID]?.year || movie.Year; }
 
+  hasTranscodedVideo(movie: OmdbMovie): boolean { return !!this.movieOverrides[movie.imdbID]?.transcodeJobId; }
+
+  get displayedMovies(): OmdbMovie[] {
+    if (this.filterMode === 'uploaded') {
+      return Object.values(this.movieOverrides)
+        .filter((m: any) => m.transcodeJobId)
+        .map((m: any) => ({ Title: m.title || '', Year: m.year || '', imdbID: m.imdbId, Type: 'movie', Poster: m.poster || 'N/A' } as OmdbMovie));
+    }
+    return this.movies;
+  }
+
+  setFilter(mode: 'all' | 'uploaded') { this.filterMode = mode; this.filterOpen = false; }
+
   loadDefaultMovies() {
     const terms = ['Marvel', 'Batman', 'Star Wars', 'Inception'];
     this.searchQuery = terms[Math.floor(Math.random() * terms.length)];
@@ -77,7 +91,7 @@ export class CmsPageComponent implements OnInit {
 
   searchMovies() {
     if (!this.searchQuery.trim()) return;
-    this.searching = true; this.errorMessage = ''; this.successMessage = ''; this.movies = [];
+    this.searching = true; this.errorMessage = ''; this.successMessage = ''; this.movies = []; this.filterMode = 'all';
     this.http.get<OmdbSearchResult>(`${this.BASE_URL}?apikey=${this.API_KEY}&s=${encodeURIComponent(this.searchQuery.trim())}`).subscribe({
       next: (res) => { this.searching = false; if (res.Response === 'True' && res.Search) this.movies = res.Search; else this.errorMessage = res.Error || 'No movies found.'; },
       error: () => { this.searching = false; this.errorMessage = 'Failed to fetch movies.'; }
@@ -86,7 +100,7 @@ export class CmsPageComponent implements OnInit {
 
   searchByImdbId() {
     if (!this.imdbIdQuery.trim()) return;
-    this.searching = true; this.errorMessage = ''; this.successMessage = ''; this.movies = [];
+    this.searching = true; this.errorMessage = ''; this.successMessage = ''; this.movies = []; this.filterMode = 'all';
     this.http.get<OmdbDetailResult>(`${this.BASE_URL}?apikey=${this.API_KEY}&i=${encodeURIComponent(this.imdbIdQuery.trim())}`).subscribe({
       next: (res) => { this.searching = false; if (res.Response === 'True') this.movies = [{ Title: res.Title, Year: res.Year, imdbID: res.imdbID, Type: 'movie', Poster: res.Poster }]; else this.errorMessage = res.Error || 'Movie not found.'; },
       error: () => { this.searching = false; this.errorMessage = 'Failed to fetch movie.'; }

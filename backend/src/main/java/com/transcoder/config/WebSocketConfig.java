@@ -1,6 +1,6 @@
 package com.transcoder.config;
 
-import com.transcoder.service.WatchPartyWebSocketHandler;
+import com.transcoder.service.WatchPartySocketService;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
 import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
@@ -10,15 +10,15 @@ import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry
 @EnableWebSocket
 public class WebSocketConfig implements WebSocketConfigurer {
 
-    private final WatchPartyWebSocketHandler watchPartyHandler;
+    private final WatchPartySocketService watchPartySocketService;
 
-    public WebSocketConfig(WatchPartyWebSocketHandler watchPartyHandler) {
-        this.watchPartyHandler = watchPartyHandler;
+    public WebSocketConfig(WatchPartySocketService watchPartySocketService) {
+        this.watchPartySocketService = watchPartySocketService;
     }
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
-        registry.addHandler(watchPartyHandler, "/ws/watch-party/{roomId}")
+        registry.addHandler(watchPartySocketService, "/ws/watch-party/{roomId}")
                 .setAllowedOrigins("*");
     }
 }

@@ -70,10 +70,57 @@
 }
 
 .video-wrapper {
-  padding: 0; overflow: hidden; background: #000;
+  padding: 0; overflow: hidden; background: #000; position: relative;
   video {
     width: 100%; max-height: 60vh; display: block;
   }
+
+  .settings-overlay {
+    position: absolute; right: 20px; top: 20px; z-index: 100;
+  }
+
+  .gear-btn {
+    background: rgba(0, 0, 0, 0.6); color: white; border: none;
+    border-radius: 50%; width: 40px; height: 40px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; transition: all 0.2s; backdrop-filter: blur(4px);
+    &:hover { background: rgba(0, 0, 0, 0.8); transform: scale(1.05); }
+  }
+
+  .settings-menu {
+    position: absolute; right: 0; top: 48px;
+    background: rgba(28, 28, 28, 0.95); color: white;
+    border-radius: 8px; min-width: 160px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    backdrop-filter: blur(8px); overflow: hidden;
+    animation: slideDown 0.2s ease-out; transform-origin: top right;
+
+    .menu-header {
+      padding: 10px 16px; font-weight: 600; font-size: 0.82rem;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+      color: rgba(255,255,255,0.5); text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .settings-list {
+      list-style: none; padding: 6px 0; margin: 0;
+      max-height: 250px; overflow-y: auto;
+
+      li {
+        padding: 8px 16px 8px 36px; cursor: pointer;
+        font-size: 0.88rem; transition: background 0.15s;
+        position: relative;
+        &:hover { background: rgba(255,255,255,0.1); }
+        &.active { font-weight: 600; color: #fff; }
+        .check { position: absolute; left: 12px; color: var(--primary); }
+      }
+    }
+  }
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
 }
 
 // Share
