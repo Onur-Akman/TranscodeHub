@@ -42,5 +42,15 @@ export const routes: Routes = [
         path: 'player/:jobId',
         loadComponent: () => import('./pages/player-page/player-page.component').then(m => m.PlayerPageComponent),
         canActivate: [authGuard]
+    },
+    {
+        path: 'watch-party',
+        loadComponent: () => import('./pages/watch-party-page/watch-party-page.component').then(m => m.WatchPartyPageComponent),
+        canActivate: [authGuard]
+    },
+    {
+        path: 'watch-party/room/:roomId',
+        loadComponent: () => import('./pages/watch-party-room-page/watch-party-room-page.component').then(m => m.WatchPartyRoomPageComponent),
+        canActivate: [authGuard]
     }
 ];
