@@ -10,6 +10,11 @@ services:
       - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U transcoder"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
   backend:
@@ -24,7 +29,8 @@ services:
     environment:
       - SPRING_PROFILES_ACTIVE=docker
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
   nginx:
