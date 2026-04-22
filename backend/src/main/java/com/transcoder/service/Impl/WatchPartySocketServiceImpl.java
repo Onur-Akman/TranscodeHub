@@ -47,28 +47,29 @@ public class WatchPartySocketServiceImpl extends TextWebSocketHandler implements
                 "username", username,
                 "users", room.getUsernames(),
                 "serverTime", System.currentTimeMillis(),
-                "videoState", room.getVideoStateMap()
-        ));
+                "videoState", room.getVideoStateMap()));
 
         broadcast(room, Map.of(
                 "type", "USER_JOINED",
                 "username", username,
-                "users", room.getUsernames()
-        ), session);
+                "users", room.getUsernames()), session);
     }
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
         String roomId = (String) session.getAttributes().get("roomId");
         String username = (String) session.getAttributes().get("username");
-        if (roomId == null || username == null) return;
+        if (roomId == null || username == null)
+            return;
 
         RoomState room = rooms.get(roomId);
-        if (room == null) return;
+        if (room == null)
+            return;
 
         Map<String, Object> msg = mapper.readValue(message.getPayload(), Map.class);
         String type = (String) msg.get("type");
-        if (type == null) return;
+        if (type == null)
+            return;
 
         switch (type) {
             case "CHAT" -> handleChat(room, username, msg);
@@ -80,8 +81,12 @@ public class WatchPartySocketServiceImpl extends TextWebSocketHandler implements
             case "REQUEST_SYNC" -> sendTo(session, Map.of(
                     "type", "SYNC",
                     "serverTime", System.currentTimeMillis(),
-                    "videoState", room.getVideoStateMap()
-            ));
+                    "videoState", room.getVideoStateMap()));
+            case "WEBRTC_OFFER", "WEBRTC_ANSWER", "WEBRTC_ICE" -> relayToUser(room, username, msg);
+            case "VOICE_STATE" -> broadcast(room, Map.of(
+                    "type", "VOICE_STATE",
+                    "username", username,
+                    "mode", msg.getOrDefault("mode", "OFF")), null);
         }
     }
 
@@ -89,10 +94,12 @@ public class WatchPartySocketServiceImpl extends TextWebSocketHandler implements
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
         String roomId = (String) session.getAttributes().get("roomId");
         String username = (String) session.getAttributes().get("username");
-        if (roomId == null || username == null) return;
+        if (roomId == null || username == null)
+            return;
 
         RoomState room = rooms.get(roomId);
-        if (room == null) return;
+        if (room == null)
+            return;
 
         room.removeUser(username);
 
@@ -102,21 +109,20 @@ public class WatchPartySocketServiceImpl extends TextWebSocketHandler implements
             broadcast(room, Map.of(
                     "type", "USER_LEFT",
                     "username", username,
-                    "users", room.getUsernames()
-            ), null);
+                    "users", room.getUsernames()), null);
         }
     }
 
     private void handleChat(RoomState room, String username, Map<String, Object> msg) {
         String text = (String) msg.get("message");
-        if (text == null || text.isBlank()) return;
+        if (text == null || text.isBlank())
+            return;
 
         broadcast(room, Map.of(
                 "type", "CHAT",
                 "username", username,
                 "message", text,
-                "timestamp", System.currentTimeMillis()
-        ), null);
+                "timestamp", System.currentTimeMillis()), null);
     }
 
     private void handlePause(RoomState room, String username, Map<String, Object> msg) {
@@ -129,14 +135,14 @@ public class WatchPartySocketServiceImpl extends TextWebSocketHandler implements
         room.pausedByUser = username;
         room.pauseLockUntil = now + 120_000;
         room.readyUsers.clear();
+        room.slowUserWaiting = null;
 
         broadcast(room, Map.of(
                 "type", "PAUSE",
                 "username", username,
                 "position", position,
                 "lockUntil", room.pauseLockUntil,
-                "serverTime", now
-        ), null);
+                "serverTime", now), null);
     }
 
     private void handlePlay(RoomState room, String username, WebSocketSession session) {
@@ -148,8 +154,7 @@ public class WatchPartySocketServiceImpl extends TextWebSocketHandler implements
                     "type", "PLAY_REJECTED",
                     "reason", room.pausedByUser + " paused. Wait " + remainingSec + "s or let them resume.",
                     "lockedBy", room.pausedByUser,
-                    "lockRemainingMs", room.pauseLockUntil - now
-            ));
+                    "lockRemainingMs", room.pauseLockUntil - now));
             return;
         }
 
@@ -158,12 +163,12 @@ public class WatchPartySocketServiceImpl extends TextWebSocketHandler implements
         room.pausedByUser = null;
         room.pauseLockUntil = 0;
         room.readyUsers.clear();
+        room.slowUserWaiting = null;
 
         broadcast(room, Map.of(
                 "type", "PLAY",
                 "position", room.videoPosition,
-                "serverTime", now
-        ), null);
+                "serverTime", now), null);
     }
 
     private void handleSeek(RoomState room, String username, Map<String, Object> msg) {
@@ -173,20 +178,35 @@ public class WatchPartySocketServiceImpl extends TextWebSocketHandler implements
         room.videoPosition = position;
         room.lastStateChangeTime = now;
         room.readyUsers.clear();
+        room.bufferStatus.clear();
+        room.slowUserWaiting = null;
+        room.lastSlowUserSyncTime = now;
 
         broadcast(room, Map.of(
                 "type", "SEEK",
                 "username", username,
                 "position", position,
                 "isPlaying", room.isPlaying,
-                "serverTime", now
-        ), null);
+                "serverTime", now), null);
     }
 
     private void handleBufferStatus(RoomState room, String username, Map<String, Object> msg) {
         double bufferedTo = toDouble(msg.get("bufferedTo"));
         double currentTime = toDouble(msg.get("currentTime"));
-        room.bufferStatus.put(username, new double[]{currentTime, bufferedTo});
+        room.bufferStatus.put(username, new double[] { currentTime, bufferedTo });
+    }
+
+    private void relayToUser(RoomState room, String sender, Map<String, Object> msg) {
+        String target = (String) msg.get("targetUser");
+        if (target == null)
+            return;
+        WebSocketSession targetSession = room.users.get(target);
+        if (targetSession == null || !targetSession.isOpen())
+            return;
+
+        Map<String, Object> relay = new LinkedHashMap<>(msg);
+        relay.put("fromUser", sender);
+        sendTo(targetSession, relay);
     }
 
     private void handleReady(RoomState room, String username) {
@@ -196,11 +216,67 @@ public class WatchPartySocketServiceImpl extends TextWebSocketHandler implements
     private void broadcastSync() {
         long now = System.currentTimeMillis();
         for (RoomState room : rooms.values()) {
-            if (room.isEmpty()) continue;
+            if (room.isEmpty())
+                continue;
 
             double currentPos = room.isPlaying
                     ? room.videoPosition + (now - room.lastStateChangeTime) / 1000.0
                     : room.videoPosition;
+
+
+            if (room.isPlaying && !room.bufferStatus.isEmpty()
+                    && now - room.lastSlowUserSyncTime > 15_000) {
+                String slowestUser = null;
+                double slowestPos = currentPos;
+
+                for (Map.Entry<String, double[]> entry : room.bufferStatus.entrySet()) {
+                    double userCurrentTime = entry.getValue()[0];
+                    double drift = currentPos - userCurrentTime;
+                    if (drift > 5.0 && userCurrentTime < slowestPos) {
+                        slowestUser = entry.getKey();
+                        slowestPos = userCurrentTime;
+                    }
+                }
+
+                if (slowestUser != null) {
+                    room.videoPosition = slowestPos;
+                    room.isPlaying = false;
+                    room.lastStateChangeTime = now;
+                    room.pausedByUser = null;
+                    room.pauseLockUntil = 0;
+                    room.lastSlowUserSyncTime = now;
+                    room.slowUserWaiting = slowestUser;
+
+                    broadcast(room, Map.of(
+                            "type", "SLOW_USER",
+                            "username", slowestUser,
+                            "position", slowestPos,
+                            "serverTime", now), null);
+                    continue;
+                }
+            }
+
+
+            if (!room.isPlaying && room.slowUserWaiting != null) {
+                double[] buf = room.bufferStatus.get(room.slowUserWaiting);
+                if (buf != null) {
+                    double bufferedTo = buf[1];
+                    double ahead = bufferedTo - room.videoPosition;
+                    if (ahead >= 3.0) {
+                        room.isPlaying = true;
+                        room.lastStateChangeTime = now;
+                        String recovered = room.slowUserWaiting;
+                        room.slowUserWaiting = null;
+
+                        broadcast(room, Map.of(
+                                "type", "SLOW_USER_RECOVERED",
+                                "username", recovered,
+                                "position", room.videoPosition,
+                                "serverTime", now), null);
+                        continue;
+                    }
+                }
+            }
 
             Map<String, Object> syncMsg = new LinkedHashMap<>();
             syncMsg.put("type", "SYNC");
@@ -209,13 +285,11 @@ public class WatchPartySocketServiceImpl extends TextWebSocketHandler implements
                     "position", currentPos,
                     "isPlaying", room.isPlaying,
                     "pausedByUser", room.pausedByUser != null ? room.pausedByUser : "",
-                    "pauseLockUntil", room.pauseLockUntil
-            ));
+                    "pauseLockUntil", room.pauseLockUntil));
 
             broadcast(room, syncMsg, null);
         }
     }
-
 
     private void broadcast(RoomState room, Map<String, Object> msg, WebSocketSession exclude) {
         String json;
@@ -226,25 +300,29 @@ public class WatchPartySocketServiceImpl extends TextWebSocketHandler implements
         }
         TextMessage textMsg = new TextMessage(json);
         for (WebSocketSession s : room.getSessions()) {
-            if (s.equals(exclude)) continue;
+            if (s.equals(exclude))
+                continue;
             if (s.isOpen()) {
                 try {
                     synchronized (s) {
                         s.sendMessage(textMsg);
                     }
-                } catch (IOException ignored) {}
+                } catch (IOException ignored) {
+                }
             }
         }
     }
 
     private void sendTo(WebSocketSession session, Map<String, Object> msg) {
-        if (!session.isOpen()) return;
+        if (!session.isOpen())
+            return;
         try {
             String json = mapper.writeValueAsString(msg);
             synchronized (session) {
                 session.sendMessage(new TextMessage(json));
             }
-        } catch (IOException ignored) {}
+        } catch (IOException ignored) {
+        }
     }
 
     private String extractRoomId(WebSocketSession session) {
@@ -254,16 +332,22 @@ public class WatchPartySocketServiceImpl extends TextWebSocketHandler implements
     }
 
     private String extractToken(WebSocketSession session) {
-        if (session.getUri() == null) return null;
+        if (session.getUri() == null)
+            return null;
         var params = UriComponentsBuilder.fromUri(session.getUri()).build().getQueryParams();
         List<String> tokens = params.get("token");
         return (tokens != null && !tokens.isEmpty()) ? tokens.get(0) : null;
     }
 
     private double toDouble(Object val) {
-        if (val instanceof Number n) return n.doubleValue();
+        if (val instanceof Number n)
+            return n.doubleValue();
         if (val instanceof String s) {
-            try { return Double.parseDouble(s); } catch (Exception e) { return 0; }
+            try {
+                return Double.parseDouble(s);
+            } catch (Exception e) {
+                return 0;
+            }
         }
         return 0;
     }
@@ -279,6 +363,8 @@ public class WatchPartySocketServiceImpl extends TextWebSocketHandler implements
         volatile long lastStateChangeTime = System.currentTimeMillis();
         volatile String pausedByUser = null;
         volatile long pauseLockUntil = 0;
+        volatile long lastSlowUserSyncTime = 0;
+        volatile String slowUserWaiting = null;
 
         RoomState(String roomId) {
             this.roomId = roomId;

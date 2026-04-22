@@ -32,7 +32,7 @@ import { filter } from 'rxjs';
             <span>Admin Panel</span>
           </a>
 
-          <a routerLink="/status" routerLinkActive="active" class="nav-item">
+          <a *ngIf="isAdmin" routerLink="/status" routerLinkActive="active" class="nav-item">
             <div class="nav-icon">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <rect x="3" y="3" width="7" height="7"></rect>
@@ -43,7 +43,7 @@ import { filter } from 'rxjs';
             </div>
             <span>Dashboard</span>
           </a>
-          <a routerLink="/presets" routerLinkActive="active" class="nav-item">
+          <a *ngIf="isAdmin" routerLink="/presets" routerLinkActive="active" class="nav-item">
             <div class="nav-icon">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="12" r="3"></circle>
@@ -52,7 +52,7 @@ import { filter } from 'rxjs';
             </div>
             <span>Presets</span>
           </a>
-          <a routerLink="/transcode" routerLinkActive="active" class="nav-item">
+          <a *ngIf="isAdmin" routerLink="/transcode" routerLinkActive="active" class="nav-item">
             <div class="nav-icon">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polyline points="16 16 12 12 8 16"></polyline>
@@ -62,7 +62,7 @@ import { filter } from 'rxjs';
             </div>
             <span>Transcode</span>
           </a>
-          <a routerLink="/live-stream" routerLinkActive="active" class="nav-item">
+          <a *ngIf="isAdmin" routerLink="/live-stream" routerLinkActive="active" class="nav-item">
             <div class="nav-icon">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M23 7l-7 5 7 5V7z"></path>
