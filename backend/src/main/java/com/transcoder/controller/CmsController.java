@@ -38,11 +38,11 @@ public class CmsController {
     private final Path dubDir;
 
     public CmsController(CmsMovieRepository movieRepository,
-                         CmsSubtitleRepository subtitleRepository,
-                         CmsDubRepository dubRepository,
-                         @Value("${app.cms.poster-dir:/app/posters}") String posterDirPath,
-                         @Value("${app.cms.subtitle-dir:/app/videos/input/subtitles}") String subtitleDirPath,
-                         @Value("${app.cms.dub-dir:/app/videos/input/dub}") String dubDirPath) {
+            CmsSubtitleRepository subtitleRepository,
+            CmsDubRepository dubRepository,
+            @Value("${app.cms.poster-dir:/app/posters}") String posterDirPath,
+            @Value("${app.cms.subtitle-dir:/app/videos/input/subtitles}") String subtitleDirPath,
+            @Value("${app.cms.dub-dir:/app/videos/input/dub}") String dubDirPath) {
         this.movieRepository = movieRepository;
         this.subtitleRepository = subtitleRepository;
         this.dubRepository = dubRepository;
@@ -126,7 +126,7 @@ public class CmsController {
     @PostMapping(value = "/movies/{imdbId}/poster", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasRole('ADMIN')")
     public CmsMovie uploadPoster(@PathVariable String imdbId,
-                                 @RequestPart("file") MultipartFile file) throws IOException {
+            @RequestPart("file") MultipartFile file) throws IOException {
         CmsMovie movie = movieRepository.findByImdbId(imdbId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Movie not found: " + imdbId));
 
@@ -161,8 +161,8 @@ public class CmsController {
     @PostMapping(value = "/movies/{imdbId}/subtitles", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasRole('ADMIN')")
     public CmsSubtitle uploadSubtitle(@PathVariable String imdbId,
-                                      @RequestPart("file") MultipartFile file,
-                                      @RequestParam("language") String language) throws IOException {
+            @RequestPart("file") MultipartFile file,
+            @RequestParam("language") String language) throws IOException {
         String fileName = generateFileName(imdbId + "_" + language, file.getOriginalFilename());
         Path target = subtitleDir.resolve(fileName);
         Files.copy(file.getInputStream(), target, StandardCopyOption.REPLACE_EXISTING);
@@ -181,7 +181,8 @@ public class CmsController {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Subtitle not found"));
         try {
             Files.deleteIfExists(subtitleDir.resolve(subtitle.getFileName()));
-        } catch (IOException ignored) {}
+        } catch (IOException ignored) {
+        }
         subtitleRepository.delete(subtitle);
     }
 
@@ -200,8 +201,8 @@ public class CmsController {
     @PostMapping(value = "/movies/{imdbId}/dubs", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasRole('ADMIN')")
     public CmsDub uploadDub(@PathVariable String imdbId,
-                            @RequestPart("file") MultipartFile file,
-                            @RequestParam("language") String language) throws IOException {
+            @RequestPart("file") MultipartFile file,
+            @RequestParam("language") String language) throws IOException {
         String fileName = generateFileName(imdbId + "_" + language, file.getOriginalFilename());
         Path target = dubDir.resolve(fileName);
         Files.copy(file.getInputStream(), target, StandardCopyOption.REPLACE_EXISTING);
@@ -220,7 +221,8 @@ public class CmsController {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Dub not found"));
         try {
             Files.deleteIfExists(dubDir.resolve(dub.getFileName()));
-        } catch (IOException ignored) {}
+        } catch (IOException ignored) {
+        }
         dubRepository.delete(dub);
     }
 
@@ -249,7 +251,8 @@ public class CmsController {
             }
 
             String contentType = Files.probeContentType(file);
-            if (contentType == null) contentType = "application/octet-stream";
+            if (contentType == null)
+                contentType = "application/octet-stream";
 
             return ResponseEntity.ok()
                     .contentType(MediaType.parseMediaType(contentType))

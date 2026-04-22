@@ -29,6 +29,16 @@
     <span><strong>{{ pausedByUser }}</strong> paused the video. Only they can resume for <strong>{{ lockRemainingSeconds }}s</strong></span>
   </div>
 
+  <!-- Slow User -->
+  <div class="slow-user-banner" *ngIf="slowUserMsg">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="10"></circle>
+      <line x1="12" y1="8" x2="12" y2="12"></line>
+      <line x1="12" y1="16" x2="12.01" y2="16"></line>
+    </svg>
+    {{ slowUserMsg }}
+  </div>
+
   <!-- Play Rejected -->
   <div class="rejected-banner" *ngIf="playRejectedMsg">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -43,47 +53,63 @@
   <div class="room-layout">
     <!-- Video Section -->
     <div class="video-section">
-      <div class="video-wrapper card">
-        <video #videoPlayer controls preload="metadata">
+      <div class="main-feed-wrapper card">
+        <!-- Movie (always in DOM for HLS state, hidden via CSS when not main) -->
+        <video #videoPlayer controls preload="metadata" [class.feed-hidden]="mainFeed !== 'movie'">
           Your browser does not support the video tag.
         </video>
 
-        <div class="settings-overlay">
-          <button class="gear-btn" (click)="toggleSettingsMenu()" title="Settings">
-            <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
-              <path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.06-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.73,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.06,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.49-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z" />
+        <!-- Self camera as main -->
+        <video class="camera-feed" *ngIf="mainFeed === 'self' && voice.localVideoStream"
+               [srcObject]="voice.localVideoStream" autoplay muted playsinline></video>
+
+        <!-- Remote camera as main -->
+        <video class="camera-feed"
+               *ngIf="mainFeed !== 'movie' && mainFeed !== 'self' && voice.remoteVideoStreams.get(mainFeed)"
+               [srcObject]="voice.remoteVideoStreams.get(mainFeed)!" autoplay playsinline></video>
+
+        <app-video-settings *ngIf="mainFeed === 'movie'"
+          [qualities]="qualities"
+          [subtitles]="subtitles"
+          [dubs]="dubs"
+          [selectedQuality]="selectedQuality"
+          [selectedSubtitle]="selectedSubtitle"
+          [selectedDub]="selectedDub"
+          (qualityChange)="onQualitySelect($event)"
+          (subtitleChange)="onSubtitleSelect($event)"
+          (dubChange)="onDubSelect($event)">
+        </app-video-settings>
+      </div>
+
+      <!-- Thumbnail Strip -->
+      <div class="thumbnail-strip" *ngIf="voice.isCameraActive || getRemoteVideoEntries().length > 0">
+        <!-- Movie thumbnail -->
+        <div class="thumb" *ngIf="mainFeed !== 'movie'" (click)="selectMainFeed('movie')">
+          <div class="thumb-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect>
+              <line x1="7" y1="2" x2="7" y2="22"></line>
+              <line x1="17" y1="2" x2="17" y2="22"></line>
+              <line x1="2" y1="12" x2="22" y2="12"></line>
             </svg>
-          </button>
-          <div class="settings-menu" *ngIf="showSettingsMenu">
-            <div class="menu-header" *ngIf="qualities.length > 0">Quality</div>
-            <ul class="settings-list" *ngIf="qualities.length > 0">
-              <li [class.active]="selectedQuality === -1" (click)="onQualitySelect(-1)">
-                <span class="check" *ngIf="selectedQuality === -1">&#10003;</span> Auto
-              </li>
-              <li *ngFor="let q of qualities" [class.active]="selectedQuality === q.id" (click)="onQualitySelect(q.id)">
-                <span class="check" *ngIf="selectedQuality === q.id">&#10003;</span> {{ q.label }}
-              </li>
-            </ul>
-            <div class="menu-header" *ngIf="subtitles.length > 0">Subtitles</div>
-            <ul class="settings-list" *ngIf="subtitles.length > 0">
-              <li [class.active]="selectedSubtitle === null" (click)="onSubtitleSelect(null)">
-                <span class="check" *ngIf="selectedSubtitle === null">&#10003;</span> Off
-              </li>
-              <li *ngFor="let s of subtitles; let i = index" [class.active]="selectedSubtitle === i" (click)="onSubtitleSelect(i)">
-                <span class="check" *ngIf="selectedSubtitle === i">&#10003;</span> {{ s.language }}
-              </li>
-            </ul>
-            <div class="menu-header" *ngIf="dubs.length > 0">Dubbing</div>
-            <ul class="settings-list" *ngIf="dubs.length > 0">
-              <li [class.active]="selectedDub === null" (click)="onDubSelect(null)">
-                <span class="check" *ngIf="selectedDub === null">&#10003;</span> Original
-              </li>
-              <li *ngFor="let d of dubs; let i = index" [class.active]="selectedDub === i" (click)="onDubSelect(i)">
-                <span class="check" *ngIf="selectedDub === i">&#10003;</span> {{ d.language }}
-              </li>
-            </ul>
           </div>
+          <span class="thumb-label">Movie</span>
         </div>
+
+        <!-- Self camera thumbnail -->
+        <div class="thumb" *ngIf="voice.isCameraActive && mainFeed !== 'self'"
+             (click)="selectMainFeed('self')">
+          <video [srcObject]="voice.localVideoStream" autoplay muted playsinline></video>
+          <span class="thumb-label">You</span>
+        </div>
+
+        <!-- Remote camera thumbnails -->
+        <ng-container *ngFor="let entry of getRemoteVideoEntries()">
+          <div class="thumb" *ngIf="mainFeed !== entry[0]" (click)="selectMainFeed(entry[0])">
+            <video [srcObject]="entry[1]" autoplay playsinline></video>
+            <span class="thumb-label">{{ entry[0] }}</span>
+          </div>
+        </ng-container>
       </div>
 
       <!-- Share Link -->
@@ -123,7 +149,81 @@
             <span class="user-name">{{ u }}</span>
             <span class="you-badge" *ngIf="u === username">you</span>
             <span class="host-badge" *ngIf="u === room?.hostUsername">host</span>
+            <span class="voice-indicator on" *ngIf="getVoiceIcon(u) === 'on'" title="Voice on">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                <line x1="12" y1="19" x2="12" y2="23"></line>
+                <line x1="8" y1="23" x2="16" y2="23"></line>
+              </svg>
+            </span>
+            <span class="camera-indicator on" *ngIf="cameraUserStates.get(u)" title="Camera on">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M23 7l-7 5 7 5V7z"></path>
+                <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+              </svg>
+            </span>
           </div>
+        </div>
+      </div>
+
+      <!-- Voice Chat Controls -->
+      <div class="voice-section card">
+        <div class="voice-header">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+            <line x1="12" y1="19" x2="12" y2="23"></line>
+            <line x1="8" y1="23" x2="16" y2="23"></line>
+          </svg>
+          <span>Voice Chat</span>
+          <button class="voice-settings-btn" (click)="toggleVoiceSettings()" title="Voice settings">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Voice Settings Panel -->
+        <div class="voice-settings-panel" *ngIf="showVoiceSettings">
+          <div class="voice-setting-row">
+            <label>Mode</label>
+            <div class="voice-mode-btns">
+              <button class="mode-btn" [class.active]="voice.voiceMode === 'OFF'" (click)="setVoiceMode('OFF')">Off</button>
+              <button class="mode-btn" [class.active]="voice.voiceMode === 'PTT'" (click)="setVoiceMode('PTT')">Push to Talk</button>
+              <button class="mode-btn" [class.active]="voice.voiceMode === 'ALWAYS_ON'" (click)="setVoiceMode('ALWAYS_ON')">Always On</button>
+            </div>
+          </div>
+          <div class="voice-setting-row" *ngIf="voice.voiceMode === 'PTT'">
+            <label>PTT Key</label>
+            <button class="ptt-key-btn" (click)="startPttKeyCapture()">
+              {{ waitingForPttKey ? 'Press any key...' : voice.pttKey }}
+            </button>
+          </div>
+        </div>
+
+        <!-- Mic & Camera Status -->
+        <div class="media-status-row">
+          <div class="mic-indicator" [class.active]="voice.isMicActive" [class.off]="voice.voiceMode === 'OFF'">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+              <line x1="12" y1="19" x2="12" y2="23"></line>
+              <line x1="8" y1="23" x2="16" y2="23"></line>
+            </svg>
+            <ng-container *ngIf="voice.voiceMode === 'OFF'">Mic off</ng-container>
+            <ng-container *ngIf="voice.voiceMode === 'PTT' && !voice.isMicActive">Hold <strong>{{ voice.pttKey }}</strong></ng-container>
+            <ng-container *ngIf="voice.voiceMode === 'PTT' && voice.isMicActive">Talking...</ng-container>
+            <ng-container *ngIf="voice.voiceMode === 'ALWAYS_ON'">Mic live</ng-container>
+          </div>
+          <button class="camera-toggle-btn" [class.active]="voice.isCameraActive" (click)="toggleCamera()">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M23 7l-7 5 7 5V7z"></path>
+              <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+            </svg>
+            {{ voice.isCameraActive ? 'Camera On' : 'Camera Off' }}
+          </button>
         </div>
       </div>
     </div>

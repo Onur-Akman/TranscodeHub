@@ -1,15 +1,29 @@
-import { Component, OnInit, OnDestroy, ViewChild, ElementRef, AfterViewInit, NgZone } from '@angular/core';
+import { Component, OnInit, OnDestroy, ViewChild, ElementRef, AfterViewInit, NgZone, HostListener, Directive, Input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { ApiService } from '../../services/api.service';
 import { AuthService } from '../../services/auth.service';
+import { VoiceChatService } from '../../services/voice-chat.service';
+import { VideoSettingsComponent } from '../../components/video-settings/video-settings.component';
 import Hls from 'hls.js';
+
+@Directive({
+  selector: '[srcObject]',
+  standalone: true
+})
+export class SrcObjectDirective {
+  @Input() set srcObject(stream: MediaStream | null) {
+    const el = this.el.nativeElement as HTMLVideoElement;
+    if (el.srcObject !== stream) el.srcObject = stream;
+  }
+  constructor(private el: ElementRef) {}
+}
 
 @Component({
   selector: 'app-watch-party-room-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink],
+  imports: [CommonModule, FormsModule, RouterLink, VideoSettingsComponent, SrcObjectDirective],
   templateUrl: './watch-party-room-page.component.html',
   styleUrl: './watch-party-room-page.component.scss'
 })
@@ -48,6 +62,9 @@ export class WatchPartyRoomPageComponent implements OnInit, AfterViewInit, OnDes
   private syncThreshold = 2.0;
   playRejectedMsg = '';
   private playRejectedTimer: any;
+  slowUserMsg = '';
+  private slowUserTimer: any;
+  private bufferInterval: any;
 
   // Subtitles & Dubs
   subtitles: any[] = [];
@@ -55,7 +72,6 @@ export class WatchPartyRoomPageComponent implements OnInit, AfterViewInit, OnDes
   selectedSubtitle: number | null = null;
   selectedDub: number | null = null;
   private dubAudio: HTMLAudioElement | null = null;
-  showSettingsMenu = false;
   qualities: { id: number; label: string }[] = [];
   selectedQuality: number = -1;
 
@@ -63,11 +79,19 @@ export class WatchPartyRoomPageComponent implements OnInit, AfterViewInit, OnDes
   shareLink = '';
   copied = false;
 
+  // Voice & Video
+  showVoiceSettings = false;
+  waitingForPttKey = false;
+  voiceUserStates = new Map<string, string>();
+  cameraUserStates = new Map<string, boolean>();
+  mainFeed: 'movie' | 'self' | string = 'movie';
+
   constructor(
     private route: ActivatedRoute,
     private api: ApiService,
     private auth: AuthService,
-    private zone: NgZone
+    private zone: NgZone,
+    public voice: VoiceChatService
   ) {}
 
   ngOnInit() {
@@ -114,12 +138,33 @@ export class WatchPartyRoomPageComponent implements OnInit, AfterViewInit, OnDes
     }, 300);
   }
 
+  @HostListener('document:keydown', ['$event'])
+  onKeyDown(e: KeyboardEvent) {
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+    if (this.waitingForPttKey) {
+      this.voice.setPttKey(e.code);
+      this.waitingForPttKey = false;
+      e.preventDefault();
+      return;
+    }
+    if (e.code === this.voice.pttKey) { this.voice.onPttDown(); e.preventDefault(); }
+  }
+
+  @HostListener('document:keyup', ['$event'])
+  onKeyUp(e: KeyboardEvent) {
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+    if (e.code === this.voice.pttKey) { this.voice.onPttUp(); }
+  }
+
   ngOnDestroy() {
+    this.voice.destroy();
     if (this.ws) { this.ws.close(); this.ws = null; }
     if (this.hls) { this.hls.destroy(); this.hls = null; }
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.lockTimer) clearInterval(this.lockTimer);
     if (this.playRejectedTimer) clearTimeout(this.playRejectedTimer);
+    if (this.slowUserTimer) clearTimeout(this.slowUserTimer);
+    if (this.bufferInterval) clearInterval(this.bufferInterval);
     if (this.dubAudio) { this.dubAudio.pause(); this.dubAudio = null; }
   }
 
@@ -209,11 +254,14 @@ export class WatchPartyRoomPageComponent implements OnInit, AfterViewInit, OnDes
 
     this.ws.onopen = () => {
       this.zone.run(() => { this.connected = true; });
+      if (this.bufferInterval) clearInterval(this.bufferInterval);
+      this.bufferInterval = setInterval(() => this.sendBufferStatus(), 2000);
     };
 
     this.ws.onclose = () => {
       this.zone.run(() => {
         this.connected = false;
+        if (this.bufferInterval) { clearInterval(this.bufferInterval); this.bufferInterval = null; }
         this.reconnectTimer = setTimeout(() => this.connectWs(), 3000);
       });
     };
@@ -240,16 +288,31 @@ export class WatchPartyRoomPageComponent implements OnInit, AfterViewInit, OnDes
         this.users = msg.users || [];
         if (msg.videoState) this.applyVideoState(msg.videoState);
         this.addSystemMessage('You joined the room');
+        this.voice.initialize((m) => this.wsSend(m), this.users, this.username);
         break;
 
       case 'USER_JOINED':
         this.users = msg.users || [];
         this.addSystemMessage(`${msg.username} joined`);
+        this.voice.onUserJoined(msg.username);
         break;
 
       case 'USER_LEFT':
         this.users = msg.users || [];
         this.addSystemMessage(`${msg.username} left`);
+        this.voice.onUserLeft(msg.username);
+        this.voiceUserStates.delete(msg.username);
+        break;
+
+      case 'WEBRTC_OFFER':
+      case 'WEBRTC_ANSWER':
+      case 'WEBRTC_ICE':
+        this.voice.handleSignalingMessage(msg);
+        break;
+
+      case 'VOICE_STATE':
+        this.voiceUserStates.set(msg.username, msg.mode);
+        if (msg.cameraEnabled !== undefined) this.cameraUserStates.set(msg.username, msg.cameraEnabled);
         break;
 
       case 'CHAT':
@@ -281,6 +344,14 @@ export class WatchPartyRoomPageComponent implements OnInit, AfterViewInit, OnDes
 
       case 'SYNC':
         if (msg.videoState) this.applySyncState(msg.videoState, msg.serverTime);
+        break;
+
+      case 'SLOW_USER':
+        this.applySlowUserSync(msg.username, msg.position);
+        break;
+
+      case 'SLOW_USER_RECOVERED':
+        this.applySlowUserRecovered(msg.username, msg.position);
         break;
     }
   }
@@ -409,13 +480,8 @@ export class WatchPartyRoomPageComponent implements OnInit, AfterViewInit, OnDes
 
   // ===================== SETTINGS (Quality / Subtitles / Dubs) =====================
 
-  toggleSettingsMenu() {
-    this.showSettingsMenu = !this.showSettingsMenu;
-  }
-
   onQualitySelect(q: number) {
     this.selectedQuality = q;
-    this.showSettingsMenu = false;
     if (!this.hls) return;
     this.hls.currentLevel = q; // -1 = auto
   }
@@ -472,7 +538,6 @@ export class WatchPartyRoomPageComponent implements OnInit, AfterViewInit, OnDes
 
   onSubtitleSelect(index: number | null) {
     this.selectedSubtitle = index;
-    this.showSettingsMenu = false;
     const video = this.videoRef?.nativeElement;
     if (!video) return;
 
@@ -488,7 +553,6 @@ export class WatchPartyRoomPageComponent implements OnInit, AfterViewInit, OnDes
 
   onDubSelect(index: number | null) {
     this.selectedDub = index;
-    this.showSettingsMenu = false;
     const video = this.videoRef?.nativeElement;
     if (!video) return;
 
@@ -510,6 +574,90 @@ export class WatchPartyRoomPageComponent implements OnInit, AfterViewInit, OnDes
     video.addEventListener('play', () => { this.dubAudio?.play().catch(() => {}); });
     video.addEventListener('pause', () => { this.dubAudio?.pause(); });
     video.addEventListener('seeked', () => { if (this.dubAudio) this.dubAudio.currentTime = video.currentTime; });
+  }
+
+  private sendBufferStatus() {
+    const video = this.videoRef?.nativeElement;
+    if (!video || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+
+    const buffered = video.buffered;
+    const bufferedTo = buffered.length > 0 ? buffered.end(buffered.length - 1) : 0;
+
+    this.wsSend({
+      type: 'BUFFER_STATUS',
+      currentTime: video.currentTime,
+      bufferedTo: bufferedTo
+    });
+  }
+
+  private applySlowUserSync(username: string, position: number) {
+    this.isPlaying = false;
+    this.pausedByUser = '';
+    this.pauseLockUntil = 0;
+    this.lockRemainingSeconds = 0;
+    if (this.lockTimer) { clearInterval(this.lockTimer); this.lockTimer = null; }
+
+    const video = this.videoRef?.nativeElement;
+    if (video) {
+      this.ignoreCount++;
+      video.currentTime = position;
+      if (!video.paused) {
+        this.ignoreCount++;
+        video.pause();
+      }
+    }
+
+    this.slowUserMsg = `${username} internet sorunlari yasiyor, video ${username} ile senkron edildi.`;
+    this.addSystemMessage(`${username} internet sorunlari yasiyor, video senkron edildi`);
+    if (this.slowUserTimer) clearTimeout(this.slowUserTimer);
+    this.slowUserTimer = setTimeout(() => this.slowUserMsg = '', 6000);
+  }
+
+  private applySlowUserRecovered(username: string, position: number) {
+    this.isPlaying = true;
+    this.pausedByUser = '';
+    this.pauseLockUntil = 0;
+    this.lockRemainingSeconds = 0;
+    if (this.lockTimer) { clearInterval(this.lockTimer); this.lockTimer = null; }
+
+    const video = this.videoRef?.nativeElement;
+    if (video) {
+      this.seekIfNeeded(video, position);
+      if (video.paused) {
+        this.ignoreCount++;
+        video.play().catch(() => {});
+      }
+    }
+
+    this.slowUserMsg = `${username} baglantisi duzelddi, video devam ediyor.`;
+    this.addSystemMessage(`${username} baglantisi duzelddi, video devam ediyor`);
+    if (this.slowUserTimer) clearTimeout(this.slowUserTimer);
+    this.slowUserTimer = setTimeout(() => this.slowUserMsg = '', 6000);
+  }
+
+  // ===================== VOICE =====================
+
+  toggleVoiceSettings() { this.showVoiceSettings = !this.showVoiceSettings; }
+
+  toggleCamera() { this.voice.toggleCamera(); }
+
+  selectMainFeed(feed: 'movie' | 'self' | string) { this.mainFeed = feed; }
+
+  getRemoteVideoEntries(): [string, MediaStream][] {
+    return Array.from(this.voice.remoteVideoStreams.entries());
+  }
+
+  setVoiceMode(mode: 'OFF' | 'PTT' | 'ALWAYS_ON') {
+    this.voice.setMode(mode);
+    this.showVoiceSettings = false;
+  }
+
+  startPttKeyCapture() { this.waitingForPttKey = true; }
+
+  getVoiceIcon(user: string): string {
+    const mode = this.voiceUserStates.get(user);
+    if (!mode || mode === 'OFF') return 'off';
+    return 'on';
   }
 
   // ===================== CHAT =====================
