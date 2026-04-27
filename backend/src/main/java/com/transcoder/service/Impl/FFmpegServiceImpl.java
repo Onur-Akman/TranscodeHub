@@ -1,6 +1,5 @@
 package com.transcoder.service.Impl;
 
-import com.github.kokorin.jaffree.StreamType;
 import com.github.kokorin.jaffree.ffmpeg.*;
 import com.github.kokorin.jaffree.ffprobe.FFprobe;
 import com.github.kokorin.jaffree.ffprobe.FFprobeResult;
@@ -27,6 +26,8 @@ import java.util.ArrayList;
 @RequiredArgsConstructor
 public class FFmpegServiceImpl implements FFmpegService {
 
+    private static final String LIVE_STREAM_INPUT = "LIVE_STREAM";
+
     private final JobRepository jobRepository;
     private final Map<Long, FFmpegResultFuture> activeJobs = new ConcurrentHashMap<>();
 
@@ -47,7 +48,7 @@ public class FFmpegServiceImpl implements FFmpegService {
             Float duration = result.getFormat().getDuration();
             return duration != null ? duration.doubleValue() : 0;
         } catch (Exception e) {
-            System.err.println("Failed to get video duration: " + e.getMessage());
+            log.warn("Failed to get video duration for input {}", inputPath, e);
             return 0;
         }
     }
@@ -60,10 +61,12 @@ public class FFmpegServiceImpl implements FFmpegService {
                            : inputDir + "/" + job.getInputFileName();
                            
         String outputPath = outputDir + "/" + job.getOutputFileName();
-        boolean isLive = "LIVE_STREAM".equals(job.getInputFileName());
+        boolean isLive = LIVE_STREAM_INPUT.equals(job.getInputFileName());
         
         File outDirFile = new File(outputPath).getParentFile();
-        if (outDirFile != null && !outDirFile.exists()) outDirFile.mkdirs();
+        if (outDirFile != null && !outDirFile.exists() && !outDirFile.mkdirs()) {
+            log.warn("Could not create output directory {}", outDirFile.getAbsolutePath());
+        }
 
         double totalDuration = isLive ? 0 : getVideoDuration(inputPath);
         
@@ -89,7 +92,7 @@ public class FFmpegServiceImpl implements FFmpegService {
         } catch (Exception e) {
             job.setStatus(TranscodeJob.Status.FAILED);
             job.setErrorMessage(e.getMessage());
-            e.printStackTrace();
+            log.error("Transcode job {} failed", job.getId(), e);
         }
 
         job.setCompletedAt(LocalDateTime.now());
@@ -299,14 +302,14 @@ public class FFmpegServiceImpl implements FFmpegService {
         Process process = new ProcessBuilder(packagerArgs).inheritIO().start();
         int exitCode = process.waitFor();
         if (exitCode != 0) {
-            throw new RuntimeException("Shaka Packager failed with exit code " + exitCode);
+            throw new IllegalStateException("Shaka Packager failed with exit code " + exitCode);
         }
         
         // Cleanup intermediate files
         for (int i = 0; i < presets.size(); i++) {
-            new File(outDirFile.getAbsolutePath() + "/int_v" + i + ".mp4").delete();
+            deleteIntermediateFile(new File(outDirFile.getAbsolutePath() + "/int_v" + i + ".mp4"));
         }
-        new File(outDirFile.getAbsolutePath() + "/int_a.mp4").delete();
+        deleteIntermediateFile(new File(outDirFile.getAbsolutePath() + "/int_a.mp4"));
     }
 
     @Override
@@ -323,11 +326,17 @@ public class FFmpegServiceImpl implements FFmpegService {
             try {
                 String searchString = new File(job.getOutputFileName()).getParent();
                 if (searchString == null) searchString = job.getOutputFileName();
-                System.out.println("Killing process matching: " + searchString);
+                log.info("Killing FFmpeg process matching {}", searchString);
                 Runtime.getRuntime().exec(new String[]{"pkill", "-9", "-f", searchString});
             } catch (Exception e) {
-                System.err.println("Failed to brutally kill ffmpeg process: " + e.getMessage());
+                log.warn("Failed to kill FFmpeg process for job {}", job.getId(), e);
             }
+        }
+    }
+
+    private void deleteIntermediateFile(File file) {
+        if (file.exists() && !file.delete()) {
+            log.debug("Could not delete intermediate media file {}", file.getAbsolutePath());
         }
     }
 }

@@ -9,7 +9,9 @@ import com.transcoder.repository.PresetRepository;
 import com.transcoder.service.FFmpegService;
 import com.transcoder.service.LiveRecordingService;
 import com.transcoder.service.TranscodeService;
+import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -22,25 +24,38 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class TranscodeServiceImpl implements TranscodeService {
+
+    private static final String LIVE_STREAM_INPUT = "LIVE_STREAM";
+    private static final long PROGRESS_STREAM_INTERVAL_MS = 1000;
 
     private final JobRepository jobRepository;
     private final PresetRepository presetRepository;
     private final FFmpegService ffmpegService;
     private final LiveRecordingService liveRecordingService;
+    private final ExecutorService progressStreamExecutor = Executors.newCachedThreadPool(r -> {
+        Thread thread = new Thread(r, "job-progress-stream");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     @Value("${app.videos.input-dir}")
     private String inputDir;
 
-    @Value("${app.videos.output-dir}")
-    private String outputDir;
-
     private static final Set<String> SUPPORTED_EXTENSIONS = Set.of(
             ".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv", ".wmv", ".m4v"
     );
+
+    @PreDestroy
+    public void shutdown() {
+        progressStreamExecutor.shutdownNow();
+    }
 
     @Override
     public List<String> listInputVideos() {
@@ -60,17 +75,17 @@ public class TranscodeServiceImpl implements TranscodeService {
         if (file.isEmpty()) {
             throw new IllegalArgumentException("File is empty");
         }
-        Path uploadDir = Paths.get(inputDir);
+        String fileName = normalizeFileName(file.getOriginalFilename());
+        Path uploadDir = inputRoot();
         Files.createDirectories(uploadDir);
-        String fileName = file.getOriginalFilename();
-        Path targetPath = uploadDir.resolve(fileName);
+        Path targetPath = resolveInputPath(fileName);
         file.transferTo(targetPath.toFile());
         return new UploadResponse("Upload successful", fileName);
     }
 
     @Override
     public TranscodeJob startTranscode(TranscodeRequest request) {
-        if (request.getInputFileName() == null && request.getInputUrl() == null) {
+        if (isBlank(request.getInputFileName()) && isBlank(request.getInputUrl())) {
             throw new IllegalArgumentException("Either inputFileName or inputUrl must be provided");
         }
 
@@ -84,12 +99,12 @@ public class TranscodeServiceImpl implements TranscodeService {
         }
 
         String baseName;
-        if (request.getInputFileName() != null) {
-            File inputFile = new File(inputDir, request.getInputFileName());
-            if (!inputFile.exists()) {
+        if (!isBlank(request.getInputFileName())) {
+            Path inputFile = resolveInputPath(request.getInputFileName());
+            if (!Files.isRegularFile(inputFile)) {
                 throw new IllegalArgumentException("Input file not found: " + request.getInputFileName());
             }
-            baseName = request.getInputFileName().replaceFirst("\\.[^.]+$", "");
+            baseName = inputFile.getFileName().toString().replaceFirst("\\.[^.]+$", "");
         } else {
             baseName = "stream_" + System.currentTimeMillis();
         }
@@ -106,10 +121,10 @@ public class TranscodeServiceImpl implements TranscodeService {
         }
 
         TranscodeJob job = new TranscodeJob();
-        if (request.getInputFileName() != null) {
+        if (!isBlank(request.getInputFileName())) {
             job.setInputFileName(request.getInputFileName());
         } else {
-            job.setInputFileName("LIVE_STREAM"); // Placeholder as column is non-nullable
+            job.setInputFileName(LIVE_STREAM_INPUT);
             job.setInputUrl(request.getInputUrl());
         }
         
@@ -129,7 +144,7 @@ public class TranscodeServiceImpl implements TranscodeService {
         ffmpegService.runTranscode(job, presets);
 
         // Start recording for live streams
-        if ("LIVE_STREAM".equals(job.getInputFileName())) {
+        if (LIVE_STREAM_INPUT.equals(job.getInputFileName())) {
             liveRecordingService.startRecording(job);
         }
 
@@ -149,8 +164,31 @@ public class TranscodeServiceImpl implements TranscodeService {
 
     @Override
     public SseEmitter streamProgress(Long id) {
+        SseEmitter emitter = new SseEmitter(0L);
 
-        throw new UnsupportedOperationException("Streaming progress not supported");
+        progressStreamExecutor.execute(() -> {
+            try {
+                while (true) {
+                    TranscodeJob job = getJob(id);
+                    emitter.send(progressPayload(job));
+
+                    if (isTerminal(job.getStatus())) {
+                        emitter.complete();
+                        return;
+                    }
+
+                    Thread.sleep(PROGRESS_STREAM_INTERVAL_MS);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                emitter.complete();
+            } catch (Exception e) {
+                log.debug("Progress stream failed for job {}", id, e);
+                emitter.completeWithError(e);
+            }
+        });
+
+        return emitter;
     }
 
     @Override
@@ -159,7 +197,7 @@ public class TranscodeServiceImpl implements TranscodeService {
         if (job.getStatus() == TranscodeJob.Status.QUEUED || job.getStatus() == TranscodeJob.Status.IN_PROGRESS) {
             ffmpegService.cancelTranscode(job);
 
-            if ("LIVE_STREAM".equals(job.getInputFileName())) {
+            if (LIVE_STREAM_INPUT.equals(job.getInputFileName())) {
                 liveRecordingService.stopRecording(id);
             }
 
@@ -167,5 +205,46 @@ public class TranscodeServiceImpl implements TranscodeService {
             job.setErrorMessage("Job was cancelled by the user");
             jobRepository.save(job);
         }
+    }
+
+    private Path inputRoot() {
+        return Paths.get(inputDir).toAbsolutePath().normalize();
+    }
+
+    private Path resolveInputPath(String fileName) {
+        Path root = inputRoot();
+        Path resolved = root.resolve(fileName).normalize();
+        if (!resolved.startsWith(root)) {
+            throw new IllegalArgumentException("Invalid input file name: " + fileName);
+        }
+        return resolved;
+    }
+
+    private String normalizeFileName(String originalName) {
+        if (isBlank(originalName)) {
+            throw new IllegalArgumentException("File name is required");
+        }
+        return Paths.get(originalName).getFileName().toString();
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
+    }
+
+    private boolean isTerminal(TranscodeJob.Status status) {
+        return status == TranscodeJob.Status.COMPLETED
+                || status == TranscodeJob.Status.FAILED
+                || status == TranscodeJob.Status.CANCELLED;
+    }
+
+    private Map<String, Object> progressPayload(TranscodeJob job) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("id", job.getId());
+        payload.put("progress", job.getProgress());
+        payload.put("status", job.getStatus());
+        if (job.getErrorMessage() != null) {
+            payload.put("errorMessage", job.getErrorMessage());
+        }
+        return payload;
     }
 }

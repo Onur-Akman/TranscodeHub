@@ -1,8 +1,11 @@
 package com.transcoder.service.Impl;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.transcoder.config.JwtUtil;
 import com.transcoder.service.WatchPartySocketService;
+import jakarta.annotation.PreDestroy;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.socket.*;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
@@ -13,16 +16,41 @@ import java.util.*;
 import java.util.concurrent.*;
 
 @Service
+@Slf4j
 public class WatchPartySocketServiceImpl extends TextWebSocketHandler implements WatchPartySocketService {
 
-    private final JwtUtil jwtUtil;
-    private final ObjectMapper mapper = new ObjectMapper();
-    private final ConcurrentHashMap<String, RoomState> rooms = new ConcurrentHashMap<>();
-    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    private static final TypeReference<Map<String, Object>> MESSAGE_TYPE = new TypeReference<>() {
+    };
+    private static final long SYNC_INITIAL_DELAY_SECONDS = 3;
+    private static final long SYNC_INTERVAL_SECONDS = 3;
+    private static final long PAUSE_LOCK_MS = 120_000;
+    private static final long SLOW_USER_CHECK_INTERVAL_MS = 15_000;
+    private static final double SLOW_USER_DRIFT_SECONDS = 5.0;
+    private static final double SLOW_USER_BUFFER_SECONDS = 3.0;
 
-    public WatchPartySocketServiceImpl(JwtUtil jwtUtil) {
+    private final JwtUtil jwtUtil;
+    private final ObjectMapper mapper;
+    private final ConcurrentHashMap<String, RoomState> rooms = new ConcurrentHashMap<>();
+    private final ScheduledExecutorService scheduler;
+
+    public WatchPartySocketServiceImpl(JwtUtil jwtUtil, ObjectMapper mapper) {
         this.jwtUtil = jwtUtil;
-        scheduler.scheduleAtFixedRate(this::broadcastSync, 3, 3, TimeUnit.SECONDS);
+        this.mapper = mapper;
+        this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread thread = new Thread(r, "watch-party-sync");
+            thread.setDaemon(true);
+            return thread;
+        });
+        scheduler.scheduleAtFixedRate(
+                this::broadcastSyncSafely,
+                SYNC_INITIAL_DELAY_SECONDS,
+                SYNC_INTERVAL_SECONDS,
+                TimeUnit.SECONDS);
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        scheduler.shutdownNow();
     }
 
     @Override
@@ -66,7 +94,10 @@ public class WatchPartySocketServiceImpl extends TextWebSocketHandler implements
         if (room == null)
             return;
 
-        Map<String, Object> msg = mapper.readValue(message.getPayload(), Map.class);
+        Map<String, Object> msg = readMessage(message);
+        if (msg == null)
+            return;
+
         String type = (String) msg.get("type");
         if (type == null)
             return;
@@ -87,6 +118,7 @@ public class WatchPartySocketServiceImpl extends TextWebSocketHandler implements
                     "type", "VOICE_STATE",
                     "username", username,
                     "mode", msg.getOrDefault("mode", "OFF")), null);
+            default -> log.debug("Ignoring unsupported watch party message type: {}", type);
         }
     }
 
@@ -133,7 +165,7 @@ public class WatchPartySocketServiceImpl extends TextWebSocketHandler implements
         room.isPlaying = false;
         room.lastStateChangeTime = now;
         room.pausedByUser = username;
-        room.pauseLockUntil = now + 120_000;
+        room.pauseLockUntil = now + PAUSE_LOCK_MS;
         room.readyUsers.clear();
         room.slowUserWaiting = null;
 
@@ -225,14 +257,14 @@ public class WatchPartySocketServiceImpl extends TextWebSocketHandler implements
 
 
             if (room.isPlaying && !room.bufferStatus.isEmpty()
-                    && now - room.lastSlowUserSyncTime > 15_000) {
+                    && now - room.lastSlowUserSyncTime > SLOW_USER_CHECK_INTERVAL_MS) {
                 String slowestUser = null;
                 double slowestPos = currentPos;
 
                 for (Map.Entry<String, double[]> entry : room.bufferStatus.entrySet()) {
                     double userCurrentTime = entry.getValue()[0];
                     double drift = currentPos - userCurrentTime;
-                    if (drift > 5.0 && userCurrentTime < slowestPos) {
+                    if (drift > SLOW_USER_DRIFT_SECONDS && userCurrentTime < slowestPos) {
                         slowestUser = entry.getKey();
                         slowestPos = userCurrentTime;
                     }
@@ -262,7 +294,7 @@ public class WatchPartySocketServiceImpl extends TextWebSocketHandler implements
                 if (buf != null) {
                     double bufferedTo = buf[1];
                     double ahead = bufferedTo - room.videoPosition;
-                    if (ahead >= 3.0) {
+                    if (ahead >= SLOW_USER_BUFFER_SECONDS) {
                         room.isPlaying = true;
                         room.lastStateChangeTime = now;
                         String recovered = room.slowUserWaiting;
@@ -291,11 +323,29 @@ public class WatchPartySocketServiceImpl extends TextWebSocketHandler implements
         }
     }
 
+    private void broadcastSyncSafely() {
+        try {
+            broadcastSync();
+        } catch (Exception e) {
+            log.warn("Watch party sync tick failed", e);
+        }
+    }
+
+    private Map<String, Object> readMessage(TextMessage message) {
+        try {
+            return mapper.readValue(message.getPayload(), MESSAGE_TYPE);
+        } catch (IOException e) {
+            log.debug("Ignoring invalid watch party message payload", e);
+            return null;
+        }
+    }
+
     private void broadcast(RoomState room, Map<String, Object> msg, WebSocketSession exclude) {
         String json;
         try {
             json = mapper.writeValueAsString(msg);
         } catch (Exception e) {
+            log.warn("Could not serialize watch party broadcast message", e);
             return;
         }
         TextMessage textMsg = new TextMessage(json);
@@ -307,7 +357,8 @@ public class WatchPartySocketServiceImpl extends TextWebSocketHandler implements
                     synchronized (s) {
                         s.sendMessage(textMsg);
                     }
-                } catch (IOException ignored) {
+                } catch (IOException e) {
+                    log.debug("Could not send watch party broadcast to session {}", s.getId(), e);
                 }
             }
         }
@@ -321,7 +372,8 @@ public class WatchPartySocketServiceImpl extends TextWebSocketHandler implements
             synchronized (session) {
                 session.sendMessage(new TextMessage(json));
             }
-        } catch (IOException ignored) {
+        } catch (IOException e) {
+            log.debug("Could not send watch party message to session {}", session.getId(), e);
         }
     }
 
@@ -345,7 +397,7 @@ public class WatchPartySocketServiceImpl extends TextWebSocketHandler implements
         if (val instanceof String s) {
             try {
                 return Double.parseDouble(s);
-            } catch (Exception e) {
+            } catch (NumberFormatException e) {
                 return 0;
             }
         }

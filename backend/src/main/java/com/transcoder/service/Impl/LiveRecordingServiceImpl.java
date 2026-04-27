@@ -7,13 +7,16 @@ import com.transcoder.repository.JobRepository;
 import com.transcoder.repository.LiveStreamSegmentRepository;
 import com.transcoder.repository.LiveStreamSettingsRepository;
 import com.transcoder.service.LiveRecordingService;
+import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -21,16 +24,33 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class LiveRecordingServiceImpl implements LiveRecordingService {
+
+    private static final int DEFAULT_CHUNK_DURATION_MINUTES = 30;
+    private static final int DEFAULT_RETENTION_PERIOD_HOURS = 168;
+    private static final int RECORDING_STOP_TIMEOUT_SECONDS = 5;
+    private static final long RECORDING_RESTART_DELAY_MS = 1000;
+    private static final long SEGMENT_SCAN_RATE_MS = 30000;
+    private static final long SEGMENT_STABILIZATION_MS = 5000;
+    private static final double MIN_SEGMENT_DURATION_SECONDS = 2.0;
 
     private final LiveStreamSettingsRepository settingsRepository;
     private final LiveStreamSegmentRepository segmentRepository;
     private final JobRepository jobRepository;
+    private final ExecutorService recordingLogExecutor = Executors.newCachedThreadPool(r -> {
+        Thread thread = new Thread(r, "recording-log-consumer");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     @Value("${app.videos.output-dir}")
     private String outputDir;
@@ -43,18 +63,27 @@ public class LiveRecordingServiceImpl implements LiveRecordingService {
     private static final DateTimeFormatter SEGMENT_DATE_FORMAT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
 
+    @PreDestroy
+    public void shutdown() {
+        activeRecordingProcesses.keySet().forEach(this::stopRecording);
+        recordingLogExecutor.shutdownNow();
+    }
+
     @Override
     public void startRecording(TranscodeJob job) {
         LiveStreamSettings settings = getSettings(job.getId());
 
         String inputUrl = job.getInputUrl();
         if (inputUrl == null || inputUrl.isEmpty()) {
-            System.err.println("Cannot start recording: no input URL for job " + job.getId());
+            log.warn("Cannot start recording: no input URL for job {}", job.getId());
             return;
         }
 
         String recordDir = outputDir + "/recordings/job_" + job.getId();
-        new File(recordDir).mkdirs();
+        File recordDirectory = new File(recordDir);
+        if (!recordDirectory.exists() && !recordDirectory.mkdirs()) {
+            log.warn("Could not create recording directory {}", recordDirectory.getAbsolutePath());
+        }
 
         int segmentSeconds = settings.getChunkDurationMinutes() * 60;
         String outputPattern = recordDir + "/rec_" + job.getId() + "_%Y-%m-%d_%H-%M-%S.mp4";
@@ -76,23 +105,12 @@ public class LiveRecordingServiceImpl implements LiveRecordingService {
             Process process = pb.start();
             activeRecordingProcesses.put(job.getId(), process);
 
+            recordingLogExecutor.submit(() -> consumeRecordingOutput(job.getId(), process));
 
-            new Thread(() -> {
-                try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-
-                    }
-                } catch (Exception e) {
-
-                }
-            }, "rec-logger-" + job.getId()).start();
-
-            System.out.println("Started recording for job " + job.getId() +
-                    " with chunk=" + settings.getChunkDurationMinutes() + "min");
+            log.info("Started recording for job {} with chunk={}min", job.getId(), settings.getChunkDurationMinutes());
 
         } catch (Exception e) {
-            System.err.println("Failed to start recording for job " + job.getId() + ": " + e.getMessage());
+            log.warn("Failed to start recording for job {}", job.getId(), e);
         }
     }
 
@@ -103,15 +121,14 @@ public class LiveRecordingServiceImpl implements LiveRecordingService {
             process.destroy();
             try {
 
-                process.waitFor(java.util.concurrent.TimeUnit.SECONDS.toMillis(5),
-                        java.util.concurrent.TimeUnit.MILLISECONDS);
+                process.waitFor(RECORDING_STOP_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
             if (process.isAlive()) {
                 process.destroyForcibly();
             }
-            System.out.println("Stopped recording for job " + jobId);
+            log.info("Stopped recording for job {}", jobId);
         }
 
 
@@ -119,7 +136,7 @@ public class LiveRecordingServiceImpl implements LiveRecordingService {
             String pattern = "rec_" + jobId + "_";
             Runtime.getRuntime().exec(new String[]{"pkill", "-f", pattern});
         } catch (Exception e) {
-
+            log.debug("Could not kill remaining recording process for job {}", jobId, e);
         }
     }
 
@@ -133,8 +150,9 @@ public class LiveRecordingServiceImpl implements LiveRecordingService {
 
         stopRecording(jobId);
 
-
-        try { Thread.sleep(1000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        if (!sleepBeforeRestart()) {
+            return;
+        }
 
         startRecording(job);
     }
@@ -144,8 +162,8 @@ public class LiveRecordingServiceImpl implements LiveRecordingService {
         return settingsRepository.findByJobId(jobId).orElseGet(() -> {
             LiveStreamSettings s = new LiveStreamSettings();
             s.setJobId(jobId);
-            s.setChunkDurationMinutes(30);
-            s.setRetentionPeriodHours(168);
+            s.setChunkDurationMinutes(DEFAULT_CHUNK_DURATION_MINUTES);
+            s.setRetentionPeriodHours(DEFAULT_RETENTION_PERIOD_HOURS);
             return settingsRepository.save(s);
         });
     }
@@ -178,7 +196,7 @@ public class LiveRecordingServiceImpl implements LiveRecordingService {
         return segmentRepository.findByJobIdOrderByStartTimeAsc(jobId);
     }
 
-    @Scheduled(fixedRate = 30000)
+    @Scheduled(fixedRate = SEGMENT_SCAN_RATE_MS)
     public void scanAndCleanSegments() {
         File recordingsRoot = new File(outputDir + "/recordings");
         if (!recordingsRoot.exists()) return;
@@ -205,7 +223,7 @@ public class LiveRecordingServiceImpl implements LiveRecordingService {
 
                 if (segmentRepository.existsByFileName(segFile.getName())) continue;
 
-                if (System.currentTimeMillis() - segFile.lastModified() < 5000) continue;
+                if (System.currentTimeMillis() - segFile.lastModified() < SEGMENT_STABILIZATION_MS) continue;
 
 
                 Matcher matcher = SEGMENT_FILENAME_PATTERN.matcher(segFile.getName());
@@ -217,7 +235,7 @@ public class LiveRecordingServiceImpl implements LiveRecordingService {
 
                     double duration = probeDuration(segFile.getAbsolutePath());
 
-                    if (duration < 2) continue;
+                    if (duration < MIN_SEGMENT_DURATION_SECONDS) continue;
 
                     LocalDateTime endTime = startTime.plusSeconds((long) duration);
 
@@ -230,10 +248,9 @@ public class LiveRecordingServiceImpl implements LiveRecordingService {
                     segment.setCreatedAt(LocalDateTime.now());
                     segmentRepository.save(segment);
 
-                    System.out.println("Discovered segment: " + segFile.getName() +
-                            " (duration=" + String.format("%.1f", duration) + "s)");
+                    log.info("Discovered segment {} duration={}s", segFile.getName(), String.format("%.1f", duration));
                 } catch (Exception e) {
-                    System.err.println("Error processing segment " + segFile.getName() + ": " + e.getMessage());
+                    log.warn("Error processing segment {}", segFile.getName(), e);
                 }
             }
 
@@ -249,8 +266,11 @@ public class LiveRecordingServiceImpl implements LiveRecordingService {
 
                         File f = new File(jobDir, seg.getFileName());
                         if (f.exists()) {
-                            f.delete();
-                            System.out.println("Deleted expired segment: " + seg.getFileName());
+                            if (f.delete()) {
+                                log.info("Deleted expired segment {}", seg.getFileName());
+                            } else {
+                                log.debug("Could not delete expired segment file {}", f.getAbsolutePath());
+                            }
                         }
                         segmentRepository.delete(seg);
                     }
@@ -273,7 +293,29 @@ public class LiveRecordingServiceImpl implements LiveRecordingService {
             process.waitFor();
             return Double.parseDouble(output);
         } catch (Exception e) {
+            log.debug("Could not probe segment duration for {}", filePath, e);
             return 0;
+        }
+    }
+
+    private void consumeRecordingOutput(Long jobId, Process process) {
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                log.trace("Recording job {}: {}", jobId, line);
+            }
+        } catch (IOException e) {
+            log.debug("Recording output consumer stopped for job {}", jobId, e);
+        }
+    }
+
+    private boolean sleepBeforeRestart() {
+        try {
+            Thread.sleep(RECORDING_RESTART_DELAY_MS);
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
         }
     }
 }
