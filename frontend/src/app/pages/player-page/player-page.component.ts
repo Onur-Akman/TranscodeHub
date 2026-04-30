@@ -479,17 +479,24 @@ export class PlayerPageComponent implements OnInit, AfterViewInit, OnDestroy {
       });
 
       this.hls.on(Hls.Events.ERROR, (event, data) => {
+        const level = data.fatal ? 'error' : 'warn';
+        console[level]('[HLS]', {
+          fatal: data.fatal,
+          type: data.type,
+          details: data.details,
+          reason: (data as any).reason,
+          response: (data as any).response,
+          url: (data as any).url,
+          frag: (data as any).frag?.url,
+          err: (data as any).err?.message,
+        });
+
         if (data.fatal) {
           const isLiveMode = this.job?.inputFileName === 'LIVE_STREAM' && !this.playingSegment;
 
           if (isLiveMode) {
-            // For live streams, always do a full retry on any fatal error.
-            // This handles the case where the m3u8 file doesn't exist yet (404)
-            // because FFmpeg hasn't generated the first segments.
-            console.log('Live stream fatal error, retrying in 3s...', data.type);
             this.triggerRetry();
           } else {
-            // For VOD playback, try lighter recovery first
             switch (data.type) {
               case Hls.ErrorTypes.NETWORK_ERROR:
                 this.hls?.startLoad();

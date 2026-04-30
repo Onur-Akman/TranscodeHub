@@ -469,7 +469,6 @@ import { ApiService, TranscodeJob, LiveStreamSettings } from '../../services/api
 export class StatusPageComponent implements OnInit, OnDestroy {
   jobs: TranscodeJob[] = [];
   loading = true;
-  private eventSources: EventSource[] = [];
   private refreshInterval: any;
 
   // Edit modal state
@@ -486,7 +485,6 @@ export class StatusPageComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy() {
-    this.closeAllEventSources();
     if (this.refreshInterval) clearInterval(this.refreshInterval);
   }
 
@@ -500,36 +498,9 @@ export class StatusPageComponent implements OnInit, OnDestroy {
       next: (jobs) => {
         this.jobs = jobs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         this.loading = false;
-        this.subscribeToActiveJobs();
       },
       error: () => this.loading = false
     });
-  }
-
-  private subscribeToActiveJobs() {
-    this.closeAllEventSources();
-    const active = this.jobs.filter(j => j.status === 'IN_PROGRESS' || j.status === 'QUEUED');
-    for (const job of active) {
-      const es = this.api.streamProgress(job.id);
-      es.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          const idx = this.jobs.findIndex(j => j.id === job.id);
-          if (idx >= 0) {
-            this.jobs[idx].progress = data.progress;
-            this.jobs[idx].status = data.status;
-            if (data.status === 'COMPLETED' || data.status === 'FAILED') es.close();
-          }
-        } catch (e) { }
-      };
-      es.onerror = () => es.close();
-      this.eventSources.push(es);
-    }
-  }
-
-  private closeAllEventSources() {
-    this.eventSources.forEach(es => es.close());
-    this.eventSources = [];
   }
 
   getStatusBadgeClass(status: string): string {

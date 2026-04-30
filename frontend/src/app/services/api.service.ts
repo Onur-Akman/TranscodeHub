@@ -100,10 +100,6 @@ export class ApiService {
         return this.http.get<TranscodeJob>(`${this.baseUrl}/jobs/${id}`);
     }
 
-    streamProgress(id: number): EventSource {
-        return new EventSource(`${this.baseUrl}/jobs/${id}/progress`);
-    }
-
     cancelJob(id: number): Observable<void> {
         return this.http.post<void>(`${this.baseUrl}/jobs/${id}/cancel`, {});
     }
